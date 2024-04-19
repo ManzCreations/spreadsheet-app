@@ -1,7 +1,10 @@
 import sys
 
 import pandas as pd
-from PyQt6.QtWidgets import QApplication, QMainWindow, QFileDialog, QMessageBox, QTextEdit, QPushButton, QInputDialog
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, \
+    QTableWidget, QTableWidgetItem, QHeaderView, QMenu, QFileDialog, QMessageBox
 
 
 class SpreadsheetApp(QMainWindow):
@@ -10,120 +13,161 @@ class SpreadsheetApp(QMainWindow):
         self.setWindowTitle("Spreadsheet Application")
         self.setGeometry(100, 100, 800, 600)
 
-        self.file_path = ""
-        self.data = None
+        self.tables = {}
 
-        self.load_button = QPushButton("Load Spreadsheet", self)
-        self.load_button.move(20, 20)
-        self.load_button.clicked.connect(self.load_file)
+        self.init_ui()
 
-        self.append_button = QPushButton("Append", self)
-        self.append_button.move(20, 60)
-        self.append_button.clicked.connect(self.append_data)
+    def init_ui(self):
+        main_layout = QHBoxLayout()
 
-        self.merge_button = QPushButton("Merge", self)
-        self.merge_button.move(20, 100)
-        self.merge_button.clicked.connect(self.merge_data)
+        # File Organizer
+        self.file_list = QListWidget()
+        self.file_list.itemClicked.connect(self.show_table)
+        main_layout.addWidget(self.file_list)
 
-        self.pivot_button = QPushButton("Pivot", self)
-        self.pivot_button.move(20, 140)
-        self.pivot_button.clicked.connect(self.pivot_data)
+        right_layout = QVBoxLayout()
 
-        self.unpivot_button = QPushButton("Unpivot", self)
-        self.unpivot_button.move(20, 180)
-        self.unpivot_button.clicked.connect(self.unpivot_data)
+        # Tab Widget
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setTabShape(QTabWidget.TabShape.Triangular)
+        right_layout.addWidget(self.tab_widget)
 
-        self.save_button = QPushButton("Save Spreadsheet", self)
-        self.save_button.move(20, 220)
-        self.save_button.clicked.connect(self.save_file)
+        # Table View
+        self.table_view = QTableWidget()
+        self.table_view.setColumnCount(0)
+        self.table_view.setRowCount(0)
+        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table_view.customContextMenuRequested.connect(self.show_context_menu)
+        right_layout.addWidget(self.table_view)
 
-        self.preview_text = QTextEdit(self)
-        self.preview_text.setGeometry(200, 20, 580, 560)
+        main_layout.addLayout(right_layout)
 
-    def load_file(self):
+        central_widget = QWidget()
+        central_widget.setLayout(main_layout)
+        self.setCentralWidget(central_widget)
+
+        self.init_menu()
+
+    def init_menu(self):
+        menubar = self.menuBar()
+
+        file_menu = menubar.addMenu("File")
+
+        add_table_action = QAction("Add Table", self)
+        add_table_action.triggered.connect(self.add_table)
+        file_menu.addAction(add_table_action)
+
+        operations_menu = menubar.addMenu("Operations")
+
+        merge_action = QAction("Merge", self)
+        merge_action.triggered.connect(self.merge_tables)
+        operations_menu.addAction(merge_action)
+
+        append_action = QAction("Append", self)
+        append_action.triggered.connect(self.append_tables)
+        operations_menu.addAction(append_action)
+
+        pivot_action = QAction("Pivot", self)
+        pivot_action.triggered.connect(self.pivot_table)
+        operations_menu.addAction(pivot_action)
+
+    def add_table(self):
         options = QFileDialog.Option.ReadOnly
-        self.file_path, _ = QFileDialog.getOpenFileName(self, "Load Spreadsheet", "",
-                                                        "Excel files (*.xlsx);;CSV files (*.csv)", options=options)
-        if self.file_path:
-            if self.file_path.endswith(".xlsx"):
-                self.data = pd.read_excel(self.file_path)
-            elif self.file_path.endswith(".csv"):
-                self.data = pd.read_csv(self.file_path)
-            self.preview_text.clear()
-            self.preview_text.insertPlainText(self.data.to_string(index=False))
+        file_path, _ = QFileDialog.getOpenFileName(self, "Add Table", "", "Excel files (*.xlsx);;CSV files (*.csv)",
+                                                   options=options)
+        if file_path:
+            if file_path.endswith(".xlsx"):
+                excel_file = pd.ExcelFile(file_path)
+                sheet_names = excel_file.sheet_names
+                for sheet_name in sheet_names:
+                    data = excel_file.parse(sheet_name)
+                    table_name = f"{file_path.split('/')[-1]} - {sheet_name}"
+                    self.tables[table_name] = data
+                    self.file_list.addItem(table_name)
+            elif file_path.endswith(".csv"):
+                data = pd.read_csv(file_path)
+                table_name = file_path.split("/")[-1]
+                self.tables[table_name] = data
+                self.file_list.addItem(table_name)
 
-    def append_data(self):
-        if self.data is not None:
-            options = QFileDialog.Option.ReadOnly
-            file_path, _ = QFileDialog.getOpenFileName(self, "Append Data", "",
-                                                       "Excel files (*.xlsx);;CSV files (*.csv)", options=options)
-            if file_path:
-                if file_path.endswith(".xlsx"):
-                    new_data = pd.read_excel(file_path)
-                elif file_path.endswith(".csv"):
-                    new_data = pd.read_csv(file_path)
-                self.data = self.data.append(new_data, ignore_index=True)
-                self.preview_text.clear()
-                self.preview_text.insertPlainText(self.data.to_string(index=False))
-        else:
-            QMessageBox.information(self, "Error", "No data loaded. Please load a spreadsheet first.")
+    def show_table(self, item):
+        table_name = item.text()
+        data = self.tables[table_name]
+        self.populate_table(data)
 
-    def merge_data(self):
-        if self.data is not None:
-            options = QFileDialog.Option.ReadOnly
-            file_path, _ = QFileDialog.getOpenFileName(self, "Merge Data", "",
-                                                       "Excel files (*.xlsx);;CSV files (*.csv)", options=options)
-            if file_path:
-                if file_path.endswith(".xlsx"):
-                    new_data = pd.read_excel(file_path)
-                elif file_path.endswith(".csv"):
-                    new_data = pd.read_csv(file_path)
-                merge_column, ok = QInputDialog.getText(self, "Merge Column", "Enter the column name to merge on:")
-                if ok and merge_column:
-                    self.data = pd.merge(self.data, new_data, on=merge_column)
-                    self.preview_text.clear()
-                    self.preview_text.insertPlainText(self.data.to_string(index=False))
-        else:
-            QMessageBox.information(self, "Error", "No data loaded. Please load a spreadsheet first.")
+    def populate_table(self, data):
+        self.table_view.setColumnCount(len(data.columns))
+        self.table_view.setRowCount(len(data))
+        self.table_view.setHorizontalHeaderLabels([f"{col} ({dtype})" for col, dtype in zip(data.columns, data.dtypes)])
 
-    def pivot_data(self):
-        if self.data is not None:
-            pivot_index, ok = QInputDialog.getText(self, "Pivot Index", "Enter the column name for the pivot index:")
-            if ok and pivot_index:
-                pivot_columns, ok = QInputDialog.getText(self, "Pivot Columns",
-                                                         "Enter the column name for the pivot columns:")
-                if ok and pivot_columns:
-                    pivot_values, ok = QInputDialog.getText(self, "Pivot Values",
-                                                            "Enter the column name for the pivot values:")
-                    if ok and pivot_values:
-                        self.data = self.data.pivot_table(index=pivot_index, columns=pivot_columns, values=pivot_values)
-                        self.preview_text.clear()
-                        self.preview_text.insertPlainText(self.data.to_string())
-        else:
-            QMessageBox.information(self, "Error", "No data loaded. Please load a spreadsheet first.")
+        for i in range(len(data)):
+            for j in range(len(data.columns)):
+                item = QTableWidgetItem(str(data.iloc[i, j]))
+                self.table_view.setItem(i, j, item)
 
-    def unpivot_data(self):
-        if self.data is not None:
-            self.data = self.data.reset_index()
-            self.data = pd.melt(self.data, id_vars=self.data.columns[0], value_vars=self.data.columns[1:])
-            self.preview_text.clear()
-            self.preview_text.insertPlainText(self.data.to_string(index=False))
-        else:
-            QMessageBox.information(self, "Error", "No data loaded. Please load a spreadsheet first.")
+    def show_context_menu(self, pos):
+        menu = QMenu(self)
 
-    def save_file(self):
-        if self.data is not None:
-            options = QFileDialog.Option.WriteOnly
-            file_path, _ = QFileDialog.getSaveFileName(self, "Save Spreadsheet", "",
-                                                       "Excel files (*.xlsx);;CSV files (*.csv)", options=options)
-            if file_path:
-                if file_path.endswith(".xlsx"):
-                    self.data.to_excel(file_path, index=False)
-                elif file_path.endswith(".csv"):
-                    self.data.to_csv(file_path, index=False)
-                QMessageBox.information(self, "Save", "Data saved successfully.")
-        else:
-            QMessageBox.information(self, "Error", "No data loaded. Please load a spreadsheet first.")
+        delete_action = QAction("Delete", self)
+        delete_action.triggered.connect(self.delete_item)
+        menu.addAction(delete_action)
+
+        add_column_action = QAction("Add Column", self)
+        add_column_action.triggered.connect(self.add_column)
+        menu.addAction(add_column_action)
+
+        add_row_action = QAction("Add Row", self)
+        add_row_action.triggered.connect(self.add_row)
+        menu.addAction(add_row_action)
+
+        menu.exec(self.table_view.mapToGlobal(pos))
+
+    def delete_item(self):
+        current_row = self.table_view.currentRow()
+        current_column = self.table_view.currentColumn()
+
+        if current_row != -1:
+            self.table_view.removeRow(current_row)
+        elif current_column != -1:
+            self.table_view.removeColumn(current_column)
+
+    def add_column(self):
+        self.table_view.insertColumn(self.table_view.columnCount())
+
+    def add_row(self):
+        self.table_view.insertRow(self.table_view.rowCount())
+
+    def merge_tables(self):
+        if len(self.tables) < 2:
+            QMessageBox.warning(self, "Error", "At least two tables are required for merging.")
+            return
+
+        merged_data = None
+        for data in self.tables.values():
+            if merged_data is None:
+                merged_data = data
+            else:
+                merged_data = pd.merge(merged_data, data, how="outer")
+
+        self.populate_table(merged_data)
+
+    def append_tables(self):
+        if len(self.tables) < 2:
+            QMessageBox.warning(self, "Error", "At least two tables are required for appending.")
+            return
+
+        appended_data = pd.concat(list(self.tables.values()), ignore_index=True)
+        self.populate_table(appended_data)
+
+    def pivot_table(self):
+        if len(self.tables) == 0:
+            QMessageBox.warning(self, "Error", "No tables available for pivoting.")
+            return
+
+        data = list(self.tables.values())[0]
+        pivot_data = data.pivot_table(index=data.columns[0], values=data.columns[1], aggfunc="sum")
+        self.populate_table(pivot_data)
 
 
 if __name__ == "__main__":
