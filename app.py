@@ -1,7 +1,302 @@
 import sys
 
 import pandas as pd
-from PyQt6.QtWidgets import QApplication, QMainWindow, QFileDialog, QMessageBox, QTextEdit, QPushButton, QInputDialog
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import *
+
+
+class MergeDialog(QDialog):
+    def __init__(self, tables, selected_table, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Append Tables")
+        self.setGeometry(100, 100, 800, 500)
+
+        self.tables = tables  # Store the tables dictionary as an instance variable
+        self.selected_column1 = None
+        self.selected_column2 = None
+
+        layout = QVBoxLayout()
+
+        # Dropdowns
+        dropdown_layout = QHBoxLayout()
+        self.table1_dropdown = QComboBox()
+        self.table1_dropdown.addItems(list(tables.keys()))
+        self.table1_dropdown.setCurrentText(selected_table)
+        dropdown_layout.addWidget(QLabel("Table 1:"))
+        dropdown_layout.addWidget(self.table1_dropdown)
+        dropdown_layout.addStretch()
+        layout.addLayout(dropdown_layout)
+
+        # Table Views
+        table_layout = QVBoxLayout()
+        self.table1_view = self.create_table_view(tables[selected_table])
+        table_layout.addWidget(self.table1_view)
+        layout.addLayout(table_layout)
+
+        # Dropdowns
+        dropdown_layout = QHBoxLayout()
+        self.table2_dropdown = QComboBox()
+        self.table2_dropdown.addItems([""] + list(tables.keys()))
+        dropdown_layout.addWidget(QLabel("Table 2:"))
+        dropdown_layout.addWidget(self.table2_dropdown)
+        dropdown_layout.addStretch()
+        layout.addLayout(dropdown_layout)
+
+        # Table Views
+        table_layout = QVBoxLayout()
+        self.table2_view = QTableWidget()
+        table_layout.addWidget(self.table2_view)
+        layout.addLayout(table_layout)
+
+        # Join Type Dropdown
+        join_layout = QHBoxLayout()
+        self.join_dropdown = QComboBox()
+        self.join_dropdown.addItems(["Inner Join", "Left Join", "Right Join", "Outer Join"])
+        join_layout.addWidget(QLabel("Join Type:"))
+        join_layout.addWidget(self.join_dropdown)
+        layout.addLayout(join_layout)
+
+        # Button
+        self.merge_button = QPushButton("Merge")
+        self.merge_button.clicked.connect(self.merge_tables)
+        layout.addWidget(self.merge_button)
+
+        self.setLayout(layout)
+
+        self.table1_dropdown.currentTextChanged.connect(self.update_table1_view)
+        self.table2_dropdown.currentTextChanged.connect(self.update_table2_view)
+
+    def create_table_view(self, data):
+        table_view = QTableWidget()
+        table_view.setColumnCount(len(data.columns))
+        table_view.setRowCount(3)
+        table_view.setHorizontalHeaderLabels(data.columns)
+        table_view.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        table_view.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectColumns)
+
+        for i in range(3):
+            for j in range(len(data.columns)):
+                item = QTableWidgetItem(str(data.iloc[i, j]))
+                table_view.setItem(i, j, item)
+
+        table_view.resizeColumnsToContents()
+        table_view.setHorizontalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
+        table_view.setVerticalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(table_view)
+
+        table_view.itemSelectionChanged.connect(self.update_selected_column)
+
+        return scroll_area
+
+    def update_table1_view(self, table_name):
+        data = self.tables[table_name]
+        self.update_table_view(self.table1_view, data)
+
+    def update_table2_view(self, table_name):
+        if table_name:
+            data = self.tables[table_name]
+            self.update_table_view(self.table2_view, data)
+        else:
+            self.table2_view.clear()
+            self.table2_view.setColumnCount(0)
+            self.table2_view.setRowCount(0)
+
+    def update_table_view(self, table_view, data):
+        if isinstance(table_view, QScrollArea):
+            table_widget = table_view.widget()
+        else:
+            table_widget = table_view
+
+        table_widget.setColumnCount(len(data.columns))
+        table_widget.setRowCount(3)
+        table_widget.setHorizontalHeaderLabels(data.columns)
+
+        for i in range(3):
+            for j in range(len(data.columns)):
+                item = QTableWidgetItem(str(data.iloc[i, j]))
+                table_widget.setItem(i, j, item)
+
+        table_widget.resizeColumnsToContents()
+        table_widget.itemSelectionChanged.connect(self.update_selected_column)
+
+    def update_selected_column(self):
+        sender = self.sender()
+        if sender == self.table1_view.widget():
+            selected_indexes = sender.selectedIndexes()
+            if selected_indexes:
+                self.selected_column1 = selected_indexes[0].column()
+        elif sender == self.table2_view:
+            selected_indexes = sender.selectedIndexes()
+            if selected_indexes:
+                self.selected_column2 = selected_indexes[0].column()
+
+    def merge_tables(self):
+        table1_name = self.table1_dropdown.currentText()
+        table2_name = self.table2_dropdown.currentText()
+        table1_data = self.tables[table1_name]
+        table2_data = self.tables[table2_name]
+
+        if self.selected_column1 is None or self.selected_column2 is None:
+            QMessageBox.warning(self, "Error", "Please select a column from each table.")
+            return
+
+        merge_column1 = table1_data.columns[self.selected_column1]
+        merge_column2 = table2_data.columns[self.selected_column2]
+
+        join_type = self.join_dropdown.currentText().lower().split(" ")[0]
+
+        merged_data = pd.merge(table1_data, table2_data, left_on=merge_column1, right_on=merge_column2, how=join_type)
+        self.parent().populate_table(merged_data)
+        self.close()
+
+
+class AppendDialog(QDialog):
+    def __init__(self, tables, selected_table, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Append Tables")
+        self.setGeometry(100, 100, 800, 500)
+
+        self.tables = tables  # Store the tables dictionary as an instance variable
+        self.selected_column1 = None
+        self.selected_column2 = None
+
+        layout = QVBoxLayout()
+
+        # Dropdowns
+        dropdown_layout = QHBoxLayout()
+        self.table1_dropdown = QComboBox()
+        self.table1_dropdown.addItems(list(tables.keys()))
+        self.table1_dropdown.setCurrentText(selected_table)
+        dropdown_layout.addWidget(QLabel("Table 1:"))
+        dropdown_layout.addWidget(self.table1_dropdown)
+        dropdown_layout.addStretch()
+        layout.addLayout(dropdown_layout)
+
+        # Table Views
+        table_layout = QVBoxLayout()
+        self.table1_view = self.create_table_view(tables[selected_table])
+        table_layout.addWidget(self.table1_view)
+        layout.addLayout(table_layout)
+
+        # Dropdowns
+        dropdown_layout = QHBoxLayout()
+        self.table2_dropdown = QComboBox()
+        self.table2_dropdown.addItems([""] + list(tables.keys()))
+        dropdown_layout.addWidget(QLabel("Table 2:"))
+        dropdown_layout.addWidget(self.table2_dropdown)
+        dropdown_layout.addStretch()
+        layout.addLayout(dropdown_layout)
+
+        # Table Views
+        table_layout = QVBoxLayout()
+        self.table2_view = QTableWidget()
+        table_layout.addWidget(self.table2_view)
+        layout.addLayout(table_layout)
+
+        # Append Direction Dropdown
+        direction_layout = QHBoxLayout()
+        self.direction_dropdown = QComboBox()
+        self.direction_dropdown.addItems(["Vertically", "Horizontally"])
+        direction_layout.addWidget(QLabel("Append Direction:"))
+        direction_layout.addWidget(self.direction_dropdown)
+        layout.addLayout(direction_layout)
+
+        # Button
+        self.append_button = QPushButton("Append")
+        self.append_button.clicked.connect(self.append_tables)
+        layout.addWidget(self.append_button)
+
+        self.setLayout(layout)
+
+        self.table1_dropdown.currentTextChanged.connect(self.update_table1_view)
+        self.table2_dropdown.currentTextChanged.connect(self.update_table2_view)
+
+    def create_table_view(self, data):
+        table_view = QTableWidget()
+        table_view.setColumnCount(len(data.columns))
+        table_view.setRowCount(3)
+        table_view.setHorizontalHeaderLabels(data.columns)
+        table_view.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        table_view.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectColumns)
+
+        for i in range(3):
+            for j in range(len(data.columns)):
+                item = QTableWidgetItem(str(data.iloc[i, j]))
+                table_view.setItem(i, j, item)
+
+        table_view.resizeColumnsToContents()
+        table_view.setHorizontalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
+        table_view.setVerticalScrollMode(QTableWidget.ScrollMode.ScrollPerPixel)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(table_view)
+
+        table_view.itemSelectionChanged.connect(self.update_selected_column)
+
+        return scroll_area
+
+    def update_table1_view(self, table_name):
+        data = self.tables[table_name]
+        self.update_table_view(self.table1_view, data)
+
+    def update_table2_view(self, table_name):
+        if table_name:
+            data = self.tables[table_name]
+            self.update_table_view(self.table2_view, data)
+        else:
+            self.table2_view.clear()
+            self.table2_view.setColumnCount(0)
+            self.table2_view.setRowCount(0)
+
+    @staticmethod
+    def update_table_view(table_view, data):
+        if isinstance(table_view, QScrollArea):
+            table_widget = table_view.widget()
+        else:
+            table_widget = table_view
+
+        table_widget.setColumnCount(len(data.columns))
+        table_widget.setRowCount(3)
+        table_widget.setHorizontalHeaderLabels(data.columns)
+
+        for i in range(3):
+            for j in range(len(data.columns)):
+                item = QTableWidgetItem(str(data.iloc[i, j]))
+                table_widget.setItem(i, j, item)
+
+        table_widget.resizeColumnsToContents()
+
+    def update_selected_column(self):
+        sender = self.sender()
+        if sender == self.table1_view.widget():
+            selected_indexes = sender.selectedIndexes()
+            if selected_indexes:
+                self.selected_column1 = selected_indexes[0].column()
+        elif sender == self.table2_view:
+            selected_indexes = sender.selectedIndexes()
+            if selected_indexes:
+                self.selected_column2 = selected_indexes[0].column()
+
+    def append_tables(self):
+        table1_name = self.table1_dropdown.currentText()
+        table2_name = self.table2_dropdown.currentText()
+        table1_data = self.tables[table1_name]
+        table2_data = self.tables[table2_name]
+
+        append_direction = self.direction_dropdown.currentText().lower()
+
+        if append_direction == "vertically":
+            appended_data = pd.concat([table1_data, table2_data], ignore_index=True)
+        else:
+            appended_data = pd.concat([table1_data, table2_data], axis=1)
+
+        self.parent().populate_table(appended_data)
+        self.close()
 
 
 class SpreadsheetApp(QMainWindow):
@@ -10,120 +305,152 @@ class SpreadsheetApp(QMainWindow):
         self.setWindowTitle("Spreadsheet Application")
         self.setGeometry(100, 100, 800, 600)
 
-        self.file_path = ""
-        self.data = None
+        self.tables = {}
 
-        self.load_button = QPushButton("Load Spreadsheet", self)
-        self.load_button.move(20, 20)
-        self.load_button.clicked.connect(self.load_file)
+        self.init_ui()
 
-        self.append_button = QPushButton("Append", self)
-        self.append_button.move(20, 60)
-        self.append_button.clicked.connect(self.append_data)
+    def init_ui(self):
+        main_layout = QHBoxLayout()
 
-        self.merge_button = QPushButton("Merge", self)
-        self.merge_button.move(20, 100)
-        self.merge_button.clicked.connect(self.merge_data)
+        # File Organizer
+        self.file_list = QListWidget()
+        self.file_list.itemClicked.connect(self.show_table)
+        self.file_list.setMaximumWidth(200)  # Set a maximum width for the file list
+        main_layout.addWidget(self.file_list)
 
-        self.pivot_button = QPushButton("Pivot", self)
-        self.pivot_button.move(20, 140)
-        self.pivot_button.clicked.connect(self.pivot_data)
+        # Table View
+        self.table_view = QTableWidget()
+        self.table_view.setColumnCount(0)
+        self.table_view.setRowCount(0)
+        self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        self.table_view.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.table_view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table_view.customContextMenuRequested.connect(self.show_context_menu)
+        main_layout.addWidget(self.table_view)
 
-        self.unpivot_button = QPushButton("Unpivot", self)
-        self.unpivot_button.move(20, 180)
-        self.unpivot_button.clicked.connect(self.unpivot_data)
+        central_widget = QWidget()
+        central_widget.setLayout(main_layout)
+        self.setCentralWidget(central_widget)
 
-        self.save_button = QPushButton("Save Spreadsheet", self)
-        self.save_button.move(20, 220)
-        self.save_button.clicked.connect(self.save_file)
+        self.init_menu()
 
-        self.preview_text = QTextEdit(self)
-        self.preview_text.setGeometry(200, 20, 580, 560)
+    def init_menu(self):
+        menubar = self.menuBar()
 
-    def load_file(self):
+        file_menu = menubar.addMenu("File")
+
+        add_table_action = QAction("Add Table", self)
+        add_table_action.triggered.connect(self.add_table)
+        file_menu.addAction(add_table_action)
+
+        operations_menu = menubar.addMenu("Operations")
+
+        merge_action = QAction("Merge", self)
+        merge_action.triggered.connect(self.merge_tables)
+        operations_menu.addAction(merge_action)
+
+        append_action = QAction("Append", self)
+        append_action.triggered.connect(self.append_tables)
+        operations_menu.addAction(append_action)
+
+        pivot_action = QAction("Pivot", self)
+        pivot_action.triggered.connect(self.pivot_table)
+        operations_menu.addAction(pivot_action)
+
+    def add_table(self):
         options = QFileDialog.Option.ReadOnly
-        self.file_path, _ = QFileDialog.getOpenFileName(self, "Load Spreadsheet", "",
-                                                        "Excel files (*.xlsx);;CSV files (*.csv)", options=options)
-        if self.file_path:
-            if self.file_path.endswith(".xlsx"):
-                self.data = pd.read_excel(self.file_path)
-            elif self.file_path.endswith(".csv"):
-                self.data = pd.read_csv(self.file_path)
-            self.preview_text.clear()
-            self.preview_text.insertPlainText(self.data.to_string(index=False))
+        file_path, _ = QFileDialog.getOpenFileName(self, "Add Table", "", "Excel files (*.xlsx);;CSV files (*.csv)",
+                                                   options=options)
+        if file_path:
+            if file_path.endswith(".xlsx"):
+                excel_file = pd.ExcelFile(file_path)
+                sheet_names = excel_file.sheet_names
+                for sheet_name in sheet_names:
+                    data = excel_file.parse(sheet_name)
+                    table_name = f"{file_path.split('/')[-1]} - {sheet_name}"
+                    self.tables[table_name] = data
+                    self.file_list.addItem(table_name)
+            elif file_path.endswith(".csv"):
+                data = pd.read_csv(file_path)
+                table_name = file_path.split("/")[-1]
+                self.tables[table_name] = data
+                self.file_list.addItem(table_name)
 
-    def append_data(self):
-        if self.data is not None:
-            options = QFileDialog.Option.ReadOnly
-            file_path, _ = QFileDialog.getOpenFileName(self, "Append Data", "",
-                                                       "Excel files (*.xlsx);;CSV files (*.csv)", options=options)
-            if file_path:
-                if file_path.endswith(".xlsx"):
-                    new_data = pd.read_excel(file_path)
-                elif file_path.endswith(".csv"):
-                    new_data = pd.read_csv(file_path)
-                self.data = self.data.append(new_data, ignore_index=True)
-                self.preview_text.clear()
-                self.preview_text.insertPlainText(self.data.to_string(index=False))
-        else:
-            QMessageBox.information(self, "Error", "No data loaded. Please load a spreadsheet first.")
+    def populate_table(self, data):
+        self.table_view.setColumnCount(len(data.columns))
+        self.table_view.setRowCount(len(data))
+        self.table_view.setHorizontalHeaderLabels([f"{col} ({dtype})" for col, dtype in zip(data.columns, data.dtypes)])
 
-    def merge_data(self):
-        if self.data is not None:
-            options = QFileDialog.Option.ReadOnly
-            file_path, _ = QFileDialog.getOpenFileName(self, "Merge Data", "",
-                                                       "Excel files (*.xlsx);;CSV files (*.csv)", options=options)
-            if file_path:
-                if file_path.endswith(".xlsx"):
-                    new_data = pd.read_excel(file_path)
-                elif file_path.endswith(".csv"):
-                    new_data = pd.read_csv(file_path)
-                merge_column, ok = QInputDialog.getText(self, "Merge Column", "Enter the column name to merge on:")
-                if ok and merge_column:
-                    self.data = pd.merge(self.data, new_data, on=merge_column)
-                    self.preview_text.clear()
-                    self.preview_text.insertPlainText(self.data.to_string(index=False))
-        else:
-            QMessageBox.information(self, "Error", "No data loaded. Please load a spreadsheet first.")
+        for i in range(len(data)):
+            for j in range(len(data.columns)):
+                item = QTableWidgetItem(str(data.iloc[i, j]))
+                self.table_view.setItem(i, j, item)
 
-    def pivot_data(self):
-        if self.data is not None:
-            pivot_index, ok = QInputDialog.getText(self, "Pivot Index", "Enter the column name for the pivot index:")
-            if ok and pivot_index:
-                pivot_columns, ok = QInputDialog.getText(self, "Pivot Columns",
-                                                         "Enter the column name for the pivot columns:")
-                if ok and pivot_columns:
-                    pivot_values, ok = QInputDialog.getText(self, "Pivot Values",
-                                                            "Enter the column name for the pivot values:")
-                    if ok and pivot_values:
-                        self.data = self.data.pivot_table(index=pivot_index, columns=pivot_columns, values=pivot_values)
-                        self.preview_text.clear()
-                        self.preview_text.insertPlainText(self.data.to_string())
-        else:
-            QMessageBox.information(self, "Error", "No data loaded. Please load a spreadsheet first.")
+    def show_context_menu(self, pos):
+        menu = QMenu(self)
 
-    def unpivot_data(self):
-        if self.data is not None:
-            self.data = self.data.reset_index()
-            self.data = pd.melt(self.data, id_vars=self.data.columns[0], value_vars=self.data.columns[1:])
-            self.preview_text.clear()
-            self.preview_text.insertPlainText(self.data.to_string(index=False))
-        else:
-            QMessageBox.information(self, "Error", "No data loaded. Please load a spreadsheet first.")
+        delete_action = QAction("Delete", self)
+        delete_action.triggered.connect(self.delete_item)
+        menu.addAction(delete_action)
 
-    def save_file(self):
-        if self.data is not None:
-            options = QFileDialog.Option.WriteOnly
-            file_path, _ = QFileDialog.getSaveFileName(self, "Save Spreadsheet", "",
-                                                       "Excel files (*.xlsx);;CSV files (*.csv)", options=options)
-            if file_path:
-                if file_path.endswith(".xlsx"):
-                    self.data.to_excel(file_path, index=False)
-                elif file_path.endswith(".csv"):
-                    self.data.to_csv(file_path, index=False)
-                QMessageBox.information(self, "Save", "Data saved successfully.")
-        else:
-            QMessageBox.information(self, "Error", "No data loaded. Please load a spreadsheet first.")
+        add_column_action = QAction("Add Column", self)
+        add_column_action.triggered.connect(self.add_column)
+        menu.addAction(add_column_action)
+
+        add_row_action = QAction("Add Row", self)
+        add_row_action.triggered.connect(self.add_row)
+        menu.addAction(add_row_action)
+
+        menu.exec(self.table_view.mapToGlobal(pos))
+
+    def delete_item(self):
+        current_row = self.table_view.currentRow()
+        current_column = self.table_view.currentColumn()
+
+        if current_row != -1:
+            self.table_view.removeRow(current_row)
+        elif current_column != -1:
+            self.table_view.removeColumn(current_column)
+
+    def add_column(self):
+        self.table_view.insertColumn(self.table_view.columnCount())
+
+    def add_row(self):
+        self.table_view.insertRow(self.table_view.rowCount())
+
+    def show_table(self, item):
+        table_name = item.text()
+        data = self.tables[table_name]
+        self.populate_table(data)
+        self.file_list.setCurrentItem(item)
+
+    def merge_tables(self):
+        if len(self.tables) < 2:
+            QMessageBox.warning(self, "Error", "At least two tables are required for merging.")
+            return
+
+        selected_table = self.file_list.currentItem().text()
+        dialog = MergeDialog(self.tables, selected_table, parent=self)  # Pass self as the parent
+        dialog.exec()
+
+    def append_tables(self):
+        if len(self.tables) < 2:
+            QMessageBox.warning(self, "Error", "At least two tables are required for appending.")
+            return
+
+        selected_table = self.file_list.currentItem().text()
+        dialog = AppendDialog(self.tables, selected_table, parent=self)  # Pass self as the parent
+        dialog.exec()
+
+    def pivot_table(self):
+        if len(self.tables) == 0:
+            QMessageBox.warning(self, "Error", "No tables available for pivoting.")
+            return
+
+        data = list(self.tables.values())[0]
+        pivot_data = data.pivot_table(index=data.columns[0], values=data.columns[1], aggfunc="sum")
+        self.populate_table(pivot_data)
 
 
 if __name__ == "__main__":
