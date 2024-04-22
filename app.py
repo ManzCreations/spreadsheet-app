@@ -2,14 +2,15 @@ import sys
 
 import pandas as pd
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction
+from PyQt6.QtGui import QAction, QFont, QIcon
 from PyQt6.QtWidgets import *
 
 
 class MergeDialog(QDialog):
     def __init__(self, tables, selected_table, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Append Tables")
+        self.setWindowTitle("Merge Tables")
+        self.setWindowIcon(QIcon("images/crm-icon-high-seas.png"))
         self.setGeometry(100, 100, 800, 500)
 
         self.tables = tables  # Store the tables dictionary as an instance variable
@@ -164,6 +165,7 @@ class AppendDialog(QDialog):
     def __init__(self, tables, selected_table, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Append Tables")
+        self.setWindowIcon(QIcon("images/crm-icon-high-seas.png"))
         self.setGeometry(100, 100, 800, 500)
 
         self.tables = tables  # Store the tables dictionary as an instance variable
@@ -327,20 +329,28 @@ class TableRevision:
         if self.current_revision > 0:
             self.current_revision -= 1
             self.data = self.revisions[self.current_revision]
+            return 0
+        else:
+            return -1
 
     def redo(self):
         if self.current_revision < len(self.revisions) - 1:
             self.current_revision += 1
             self.data = self.revisions[self.current_revision]
+            return 0
+        else:
+            return -1
 
 
 class SpreadsheetApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Spreadsheet Application")
+        self.setWindowIcon(QIcon("images/crm-icon-high-seas.png"))
         self.setGeometry(100, 100, 800, 600)
 
         self.tables = {}
+        self.pressed_keys = set()
 
         self.init_ui()
 
@@ -364,8 +374,12 @@ class SpreadsheetApp(QMainWindow):
 
         # File Organizer
         self.file_list = QListWidget()
-        self.file_list.itemClicked.connect(self.show_table)
         self.file_list.setMaximumWidth(200)  # Set a maximum width for the file list
+        self.file_list.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
+        self.file_list.itemDoubleClicked.connect(self.show_table)
+        self.file_list.itemChanged.connect(self.rename_table)
+        self.file_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.file_list.customContextMenuRequested.connect(self.show_file_context_menu)
         file_table_layout.addWidget(self.file_list)
 
         # Table View
@@ -377,6 +391,8 @@ class SpreadsheetApp(QMainWindow):
         self.table_view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table_view.customContextMenuRequested.connect(self.show_context_menu)
+        self.table_view.horizontalHeader().setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
+        self.table_view.horizontalHeader().sectionDoubleClicked.connect(self.rename_column)
         file_table_layout.addWidget(self.table_view)
 
         main_layout.addLayout(file_table_layout)
@@ -422,12 +438,15 @@ class SpreadsheetApp(QMainWindow):
                     data = excel_file.parse(sheet_name)
                     table_name = f"{file_path.split('/')[-1]} - {sheet_name}"
                     self.tables[table_name] = TableRevision(data)
-                    self.file_list.addItem(table_name)
+                    item = QListWidgetItem(table_name)
+                    self.file_list.addItem(item)
+                    self.file_list.setCurrentItem(item)
             elif file_path.endswith(".csv"):
                 data = pd.read_csv(file_path)
                 table_name = file_path.split("/")[-1]
                 self.tables[table_name] = TableRevision(data)
                 self.file_list.addItem(table_name)
+            self.show_table(self.file_list.currentItem())
 
     def populate_table(self, data):
         self.table_view.setColumnCount(len(data.columns))
@@ -438,6 +457,95 @@ class SpreadsheetApp(QMainWindow):
             for j in range(len(data.columns)):
                 item = QTableWidgetItem(str(data.iloc[i, j]))
                 self.table_view.setItem(i, j, item)
+
+    def show_file_context_menu(self, pos):
+        item = self.file_list.itemAt(pos)
+        if item:
+            menu = QMenu(self)
+            rename_action = menu.addAction("Rename Table")
+            delete_action = menu.addAction("Delete Table")
+            rollback_action = menu.addAction("Rollback to Original")
+            move_up_action = menu.addAction("Move Table Up")
+            move_down_action = menu.addAction("Move Table Down")
+
+            action = menu.exec(self.file_list.mapToGlobal(pos))
+
+            if action == rename_action:
+                self.rename_table(item)
+            elif action == delete_action:
+                self.delete_table(item)
+            elif action == rollback_action:
+                self.rollback_table(item)
+            elif action == move_up_action:
+                self.move_table_up(item)
+            elif action == move_down_action:
+                self.move_table_down(item)
+
+    def rename_table(self, item):
+        old_name = item.text()
+        new_name, ok = QInputDialog.getText(self, "Rename Table", "Enter new table name:", QLineEdit.EchoMode.Normal,
+                                            old_name)
+        if ok and new_name != old_name:
+            self.tables[new_name] = self.tables.pop(old_name)
+            item.setText(new_name)
+
+    def delete_table(self, item):
+        table_name = item.text()
+        del self.tables[table_name]
+
+        current_row = self.file_list.row(item)
+        self.file_list.takeItem(current_row)
+
+        if self.file_list.count() > 0:
+            if current_row > 0:
+                new_current_item = self.file_list.item(current_row - 1)
+            else:
+                new_current_item = self.file_list.item(0)
+
+            self.file_list.setCurrentItem(new_current_item)
+            self.show_table(new_current_item)
+        else:
+            self.table_view.setColumnCount(0)
+            self.table_view.setRowCount(0)
+
+    def rollback_table(self, item):
+        table_name = item.text()
+        table_revision = self.tables[table_name]
+        table_revision.current_revision = 0
+        table_revision.data = table_revision.revisions[0]
+        self.populate_table(table_revision.data)
+
+    def move_table_up(self, item):
+        current_row = self.file_list.row(item)
+        if current_row > 0:
+            self.file_list.takeItem(current_row)
+            self.file_list.insertItem(current_row - 1, item)
+            self.file_list.setCurrentItem(item)
+        else:
+            QMessageBox.information(self, "Info", "The table is already at the top.")
+
+    def move_table_down(self, item):
+        current_row = self.file_list.row(item)
+        if current_row < self.file_list.count() - 1:
+            self.file_list.takeItem(current_row)
+            self.file_list.insertItem(current_row + 1, item)
+            self.file_list.setCurrentItem(item)
+        else:
+            QMessageBox.information(self, "Info", "The table is already at the bottom.")
+
+    def rename_column(self, column_index):
+        table_name = self.file_list.currentItem().text()
+        table_revision = self.tables[table_name]
+        data = table_revision.revisions[table_revision.current_revision].copy()
+        old_name = data.columns[column_index]
+        old_dtype = str(data.dtypes[column_index])
+        new_name, ok = QInputDialog.getText(self, "Rename Column", "Enter new column name:", QLineEdit.EchoMode.Normal,
+                                            old_name)
+        if ok and new_name != old_name:
+            data.rename(columns={old_name: new_name}, inplace=True)
+            table_revision.add_revision(data)
+            self.populate_table(data)
+            self.table_view.horizontalHeaderItem(column_index).setText(f"{new_name} ({old_dtype})")
 
     def show_context_menu(self, pos):
         menu = QMenu(self)
@@ -458,8 +566,8 @@ class SpreadsheetApp(QMainWindow):
             menu.addAction("Insert Row Below", self.insert_row_below)
         else:
             # No selection or a single cell is selected
-            menu.addAction("Delete Row", self.delete_row)
-            menu.addAction("Delete Column", self.delete_column)
+            menu.addAction("Delete Selected Rows", self.delete_selected_rows)
+            menu.addAction("Delete Selected Columns", self.delete_selected_columns)
             menu.addSeparator()
             menu.addAction("Insert Row Above", self.insert_row_above)
             menu.addAction("Insert Row Below", self.insert_row_below)
@@ -469,30 +577,31 @@ class SpreadsheetApp(QMainWindow):
         menu.exec(self.table_view.mapToGlobal(pos))
 
     def delete_selected_rows(self):
-        selected_rows = self.table_view.selectionModel().selectedRows()
-        if selected_rows:
+        selected_indexes = self.table_view.selectedIndexes()
+        if selected_indexes:
             table_name = self.file_list.currentItem().text()
             table_revision = self.tables[table_name]
             data = table_revision.revisions[table_revision.current_revision].copy()
-            for model_index in reversed(selected_rows):
-                data.drop(data.index[model_index.row()], inplace=True)
+            rows_to_delete = set(index.row() for index in selected_indexes)
+            data.drop(data.index[list(rows_to_delete)], inplace=True)
             table_revision.add_revision(data)
             self.populate_table(data)
 
     def delete_selected_columns(self):
-        selected_columns = self.table_view.selectionModel().selectedColumns()
-        if selected_columns:
+        selected_indexes = self.table_view.selectedIndexes()
+        if selected_indexes:
             table_name = self.file_list.currentItem().text()
             table_revision = self.tables[table_name]
             data = table_revision.revisions[table_revision.current_revision].copy()
-            column_names = [data.columns[model_index.column()] for model_index in selected_columns]
-            data.drop(columns=column_names, inplace=True)
+            columns_to_delete = set(data.columns[index.column()] for index in selected_indexes)
+            data.drop(columns=list(columns_to_delete), inplace=True)
             table_revision.add_revision(data)
             self.populate_table(data)
 
     def insert_row_above(self):
-        current_row = self.table_view.currentRow()
-        if current_row != -1:
+        selected_indexes = self.table_view.selectedIndexes()
+        if selected_indexes:
+            current_row = min(index.row() for index in selected_indexes)
             table_name = self.file_list.currentItem().text()
             table_revision = self.tables[table_name]
             data = table_revision.revisions[table_revision.current_revision].copy()
@@ -502,8 +611,9 @@ class SpreadsheetApp(QMainWindow):
             self.populate_table(data)
 
     def insert_row_below(self):
-        current_row = self.table_view.currentRow()
-        if current_row != -1:
+        selected_indexes = self.table_view.selectedIndexes()
+        if selected_indexes:
+            current_row = max(index.row() for index in selected_indexes)
             table_name = self.file_list.currentItem().text()
             table_revision = self.tables[table_name]
             data = table_revision.revisions[table_revision.current_revision].copy()
@@ -513,8 +623,9 @@ class SpreadsheetApp(QMainWindow):
             self.populate_table(data)
 
     def insert_column_left(self):
-        current_column = self.table_view.currentColumn()
-        if current_column != -1:
+        selected_indexes = self.table_view.selectedIndexes()
+        if selected_indexes:
+            current_column = min(index.column() for index in selected_indexes)
             table_name = self.file_list.currentItem().text()
             table_revision = self.tables[table_name]
             data = table_revision.revisions[table_revision.current_revision].copy()
@@ -524,8 +635,9 @@ class SpreadsheetApp(QMainWindow):
             self.populate_table(data)
 
     def insert_column_right(self):
-        current_column = self.table_view.currentColumn()
-        if current_column != -1:
+        selected_indexes = self.table_view.selectedIndexes()
+        if selected_indexes:
+            current_column = max(index.column() for index in selected_indexes)
             table_name = self.file_list.currentItem().text()
             table_revision = self.tables[table_name]
             data = table_revision.revisions[table_revision.current_revision].copy()
@@ -568,20 +680,55 @@ class SpreadsheetApp(QMainWindow):
         self.populate_table(pivot_data)
 
     def undo_revision(self):
+        if len(self.tables) < 1:
+            QMessageBox.warning(self, "Error", "Nothing to undo.")
+            return
+
         table_name = self.file_list.currentItem().text()
         table_revision = self.tables[table_name]
-        table_revision.undo()
-        self.populate_table(table_revision.data)
+        status = table_revision.undo()
+        if status != -1:
+            self.populate_table(table_revision.data)
+        else:
+            QMessageBox.warning(self, "Error", "Nothing to undo.")
 
     def redo_revision(self):
+        if len(self.tables) < 1:
+            QMessageBox.warning(self, "Error", "Nothing to redo.")
+            return
+
         table_name = self.file_list.currentItem().text()
         table_revision = self.tables[table_name]
-        table_revision.redo()
-        self.populate_table(table_revision.data)
+        status = table_revision.redo()
+        if status != -1:
+            self.populate_table(table_revision.data)
+        else:
+            QMessageBox.warning(self, "Error", "Nothing to redo.")
+
+
+def load_stylesheet() -> str:
+    """
+    Load the stylesheet from a given file path.
+
+    :return: The stylesheet content as a string.
+    """
+    # Determine the full path to the icons folder
+    icons_path = "images"
+    try:
+        with open("stylesheet.qss", "r") as file:
+            return file.read().replace('{{ICON_PATH}}', str(icons_path).replace("\\", "/"))
+    except IOError:
+        print(
+            f"Error opening stylesheet file: "
+            f"stylesheet.qss")
+        return ""
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setFont(QFont("Arial", 10))
+    stylesheet = load_stylesheet()
+    app.setStyleSheet(stylesheet)
     spreadsheet_app = SpreadsheetApp()
     spreadsheet_app.show()
     sys.exit(app.exec())
