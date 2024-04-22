@@ -2,9 +2,15 @@ import sys
 
 import pandas as pd
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QFont, QIcon
+from PyQt6.QtGui import QAction, QFont, QIcon, QCursor
 from PyQt6.QtWidgets import *
 
+
+# TODO: What the hell am I doing with the loading window? Create a gif maybe?
+# TODO: Test appending
+# TODO: Add text to explain what to do everywhere. Look at doing this in merge first as an explanation is necessary for joins.
+# TODO: Add export button
+# TODO: Update pivoting and un-pivoting
 
 class MergeDialog(QDialog):
     def __init__(self, tables, selected_table, parent=None):
@@ -343,6 +349,42 @@ class TableRevision:
 
 
 class SpreadsheetApp(QMainWindow):
+    """
+    Represents the main window of the Spreadsheet Application. It includes a file list
+    for managing tables, a table view for displaying data, and various tools for data
+    manipulation and visualization.
+
+    Functions:
+    - __init__: Initializes the main window with a layout, headers, file list, table view, and tools.
+    - init_ui: Sets up the user interface components and layouts.
+    - init_menu: Creates the menu bar with file and operations menus.
+    - add_table: Adds a new table to the application from an Excel or CSV file.
+    - populate_table: Populates the table view with data from the selected table.
+    - show_file_context_menu: Displays a context menu for file operations.
+    - rename_table: Renames the selected table.
+    - delete_table: Deletes the selected table.
+    - rollback_table: Rolls back the selected table to its original state.
+    - move_table_up: Moves the selected table up in the file list.
+    - move_table_down: Moves the selected table down in the file list.
+    - rename_column: Renames the selected column in the table view.
+    - show_context_menu: Displays a context menu for table operations.
+    - delete_selected_rows: Deletes the selected rows from the table.
+    - delete_selected_columns: Deletes the selected columns from the table.
+    - insert_row_above: Inserts a new row above the selected row.
+    - insert_row_below: Inserts a new row below the selected row.
+    - insert_column_left: Inserts a new column to the left of the selected column.
+    - insert_column_right: Inserts a new column to the right of the selected column.
+    - show_table: Displays the selected table in the table view.
+    - merge_tables: Opens a dialog to merge two tables.
+    - append_tables: Opens a dialog to append tables.
+    - pivot_table: Performs a pivot operation on the selected table.
+    - undo_revision: Undoes the last revision made to the selected table.
+    - redo_revision: Redoes the last undone revision made to the selected table.
+    - updateButtonStyle: Updates the style of the filter buttons based on their state.
+    - filterTable: Filters the table based on the entered text and selected column.
+    - sort_column: Sorts the selected column in the table view.
+    """
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Spreadsheet Application")
@@ -351,19 +393,36 @@ class SpreadsheetApp(QMainWindow):
 
         self.tables = {}
         self.pressed_keys = set()
+        self.current_showing_table = None
 
         self.init_ui()
 
     def init_ui(self):
         main_layout = QVBoxLayout()
 
+        # Header
+        header_layout = QHBoxLayout()
+        title_label = QLabel("Spreadsheet Application")
+        title_label.setStyleSheet("font-size: 18pt; font-weight: bold;")
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+        main_layout.addLayout(header_layout)
+
+        # Explanation
+        explanation_label = QLabel("Use the File menu to load/export tables into the application. "
+                                   "Use the Operations menu to do actions like merge, append, pivot, or un-pivot.")
+        explanation_label.setStyleSheet("font-size: 10pt; color: #888;")
+        main_layout.addWidget(explanation_label)
+
         # Revision buttons
         revision_button_layout = QHBoxLayout()
         undo_button = QPushButton("Undo")
+        undo_button.setToolTip("Undo the last revision made to the selected table.")
         undo_button.clicked.connect(self.undo_revision)
         revision_button_layout.addWidget(undo_button)
 
         redo_button = QPushButton("Redo")
+        redo_button.setToolTip("Redo the last undone revision made to the selected table.")
         redo_button.clicked.connect(self.redo_revision)
         revision_button_layout.addWidget(redo_button)
 
@@ -372,17 +431,30 @@ class SpreadsheetApp(QMainWindow):
 
         file_table_layout = QHBoxLayout()
 
-        # File Organizer
+        # File List
+        file_list_layout = QVBoxLayout()
+        file_list_label = QLabel("Tables")
+        file_list_label.setStyleSheet("font-size: 12pt; font-weight: bold;")
+        file_list_layout.addWidget(file_list_label)
+
         self.file_list = QListWidget()
         self.file_list.setMaximumWidth(200)  # Set a maximum width for the file list
         self.file_list.setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
+        self.file_list.setToolTip("Double-click a table to show its data in the table view. "
+                                  "Right-click for more options.")
         self.file_list.itemDoubleClicked.connect(self.show_table)
         self.file_list.itemChanged.connect(self.rename_table)
         self.file_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.file_list.customContextMenuRequested.connect(self.show_file_context_menu)
-        file_table_layout.addWidget(self.file_list)
+        file_list_layout.addWidget(self.file_list)
+        file_table_layout.addLayout(file_list_layout)
 
         # Table View
+        table_view_layout = QVBoxLayout()
+        table_view_label = QLabel("Data")
+        table_view_label.setStyleSheet("font-size: 12pt; font-weight: bold;")
+        table_view_layout.addWidget(table_view_label)
+
         self.table_view = QTableWidget()
         self.table_view.setColumnCount(0)
         self.table_view.setRowCount(0)
@@ -390,12 +462,49 @@ class SpreadsheetApp(QMainWindow):
         self.table_view.setHorizontalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.table_view.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.table_view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table_view.setToolTip("Double-click a column header to rename it. Right-click for more options.")
         self.table_view.customContextMenuRequested.connect(self.show_context_menu)
         self.table_view.horizontalHeader().setEditTriggers(QAbstractItemView.EditTrigger.DoubleClicked)
         self.table_view.horizontalHeader().sectionDoubleClicked.connect(self.rename_column)
-        file_table_layout.addWidget(self.table_view)
+        table_view_layout.addWidget(self.table_view)
+        file_table_layout.addLayout(table_view_layout)
 
         main_layout.addLayout(file_table_layout)
+
+        # Filter Row
+        self.filterRowLayout = QHBoxLayout()
+        self.filterRowLayout.setSpacing(10)
+
+        # Filter and Sorting Section Header
+        self.filterSectionHeader = QLabel(
+            "Filter Table View (Select a column, then type to filter. Double-click a column header to sort.)")
+        self.filterSectionHeader.setStyleSheet("font-size: 10pt; margin-top: 10px;")
+        main_layout.addWidget(self.filterSectionHeader)
+
+        # Text Editor for Filtering
+        self.filterTextEditor = QLineEdit()
+        self.filterTextEditor.setPlaceholderText("Filter...")
+        self.filterTextEditor.textChanged.connect(self.filterTable)
+        self.filterTextEditor.setToolTip("Enter text to filter the data in the selected column.")
+        self.filterRowLayout.addWidget(self.filterTextEditor)
+
+        # Starts With Button
+        self.swButton = QPushButton("Sw")
+        self.swButton.setCheckable(True)
+        self.swButton.clicked.connect(self.updateButtonStyle)
+        self.swButton.setToolTip(
+            "Starts With: Select this button if you want to filter only to words that start with the letters/numbers in your filter criteria.")
+        self.filterRowLayout.addWidget(self.swButton)
+
+        # Match Case Button
+        self.ccButton = QPushButton("Cc")
+        self.ccButton.setCheckable(True)
+        self.ccButton.clicked.connect(self.updateButtonStyle)
+        self.ccButton.setToolTip(
+            "Match Case: Select this button if you want to match the case that you have in the filter criteria.")
+        self.filterRowLayout.addWidget(self.ccButton)
+
+        main_layout.addLayout(self.filterRowLayout)
 
         central_widget = QWidget()
         central_widget.setLayout(main_layout)
@@ -426,6 +535,49 @@ class SpreadsheetApp(QMainWindow):
         pivot_action.triggered.connect(self.pivot_table)
         operations_menu.addAction(pivot_action)
 
+    def updateButtonStyle(self):
+        """
+        Updates the style of the Sw and Cc buttons based on their checked state.
+        """
+        sender = self.sender()
+        if sender.isChecked():
+            sender.setStyleSheet("background-color: #4d8d9c;")  # Darker color when checked
+        else:
+            sender.setStyleSheet("")  # Revert to default stylesheet
+
+    def filterTable(self):
+        """
+        Filters the table rows based on the text entered in the filterTextEditor and the selected column.
+
+        The method performs a case-insensitive comparison of the filter text with the data in the selected column.
+        It hides rows that do not contain the filter text in the selected column. The comparison takes into
+        account the data type of the column (numeric, date, or string) for appropriate formatting and comparison.
+        """
+        filter_text = self.filterTextEditor.text()
+        column_index = self.table_view.currentColumn()
+
+        if column_index == -1:
+            return  # Exit if no column is selected
+
+        for row in range(self.table_view.rowCount()):
+            item = self.table_view.item(row, column_index)
+            if item is None:
+                self.table_view.setRowHidden(row, True)
+                continue
+
+            cell_value = item.text()
+
+            # Adjust for case sensitivity based on Cc button
+            if not self.ccButton.isChecked():
+                filter_text = filter_text.lower()
+                cell_value = cell_value.lower()
+
+            # Adjust for "Starts With" functionality based on Sw button
+            if self.swButton.isChecked():
+                self.table_view.setRowHidden(row, not cell_value.startswith(filter_text))
+            else:
+                self.table_view.setRowHidden(row, filter_text not in cell_value)
+
     def add_table(self):
         options = QFileDialog.Option.ReadOnly
         file_path, _ = QFileDialog.getOpenFileName(self, "Add Table", "", "Excel files (*.xlsx);;CSV files (*.csv)",
@@ -449,6 +601,7 @@ class SpreadsheetApp(QMainWindow):
             self.show_table(self.file_list.currentItem())
 
     def populate_table(self, data):
+        self.table_view.clear()
         self.table_view.setColumnCount(len(data.columns))
         self.table_view.setRowCount(len(data))
         self.table_view.setHorizontalHeaderLabels([f"{col} ({dtype})" for col, dtype in zip(data.columns, data.dtypes)])
@@ -457,6 +610,15 @@ class SpreadsheetApp(QMainWindow):
             for j in range(len(data.columns)):
                 item = QTableWidgetItem(str(data.iloc[i, j]))
                 self.table_view.setItem(i, j, item)
+
+    def show_table(self, item):
+        table_name = item.text()
+        table_revision = self.tables[table_name]
+        if self.table_view.horizontalHeader().count() > 0 and table_name == self.current_showing_table:
+            return  # Table is already displayed, no need to repopulate
+        self.populate_table(table_revision.data)
+        self.file_list.setCurrentItem(item)
+        self.current_showing_table = table_name
 
     def show_file_context_menu(self, pos):
         item = self.file_list.itemAt(pos)
@@ -559,6 +721,8 @@ class SpreadsheetApp(QMainWindow):
             menu.addAction("Delete Selected Columns", self.delete_selected_columns)
             menu.addAction("Insert Column Left", self.insert_column_left)
             menu.addAction("Insert Column Right", self.insert_column_right)
+            menu.addAction("Sort Column (ascending)", self.sort_column_ascending)
+            menu.addAction("Sort Column (descending)", self.sort_column_descending)
         elif selected_rows:
             # One or more rows are selected
             menu.addAction("Delete Selected Rows", self.delete_selected_rows)
@@ -573,6 +737,9 @@ class SpreadsheetApp(QMainWindow):
             menu.addAction("Insert Row Below", self.insert_row_below)
             menu.addAction("Insert Column Left", self.insert_column_left)
             menu.addAction("Insert Column Right", self.insert_column_right)
+            menu.addSeparator()
+            menu.addAction("Sort Column (ascending)", self.sort_column_ascending)
+            menu.addAction("Sort Column (descending)", self.sort_column_descending)
 
         menu.exec(self.table_view.mapToGlobal(pos))
 
@@ -646,12 +813,6 @@ class SpreadsheetApp(QMainWindow):
             table_revision.add_revision(data)
             self.populate_table(data)
 
-    def show_table(self, item):
-        table_name = item.text()
-        table_revision = self.tables[table_name]
-        self.populate_table(table_revision.data)
-        self.file_list.setCurrentItem(item)
-
     def merge_tables(self):
         if len(self.tables) < 2:
             QMessageBox.warning(self, "Error", "At least two tables are required for merging.")
@@ -704,6 +865,34 @@ class SpreadsheetApp(QMainWindow):
             self.populate_table(table_revision.data)
         else:
             QMessageBox.warning(self, "Error", "Nothing to redo.")
+
+    def sort_column_ascending(self):
+        selected_indexes = self.table_view.selectedIndexes()
+        if selected_indexes:
+            column_index = selected_indexes[0].column()
+            table_name = self.file_list.currentItem().text()
+            table_revision = self.tables[table_name]
+            data = table_revision.revisions[table_revision.current_revision].copy()
+            column_name = data.columns[column_index]
+
+            data.sort_values(by=column_name, ascending=True, inplace=True)
+
+            table_revision.add_revision(data)
+            self.populate_table(data)
+
+    def sort_column_descending(self):
+        selected_indexes = self.table_view.selectedIndexes()
+        if selected_indexes:
+            column_index = selected_indexes[0].column()
+            table_name = self.file_list.currentItem().text()
+            table_revision = self.tables[table_name]
+            data = table_revision.revisions[table_revision.current_revision].copy()
+            column_name = data.columns[column_index]
+
+            data.sort_values(by=column_name, ascending=False, inplace=True)
+
+            table_revision.add_revision(data)
+            self.populate_table(data)
 
 
 def load_stylesheet() -> str:
