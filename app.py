@@ -1,16 +1,252 @@
+import os
 import sys
+import re
 
 import pandas as pd
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QFont, QIcon, QCursor
+from PyQt6.QtGui import QAction, QFont, QIcon, QColor
 from PyQt6.QtWidgets import *
+from openpyxl import load_workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 
 # TODO: What the hell am I doing with the loading window? Create a gif maybe?
-# TODO: Test appending
-# TODO: Add text to explain what to do everywhere. Look at doing this in merge first as an explanation is necessary for joins.
-# TODO: Add export button
 # TODO: Update pivoting and un-pivoting
+# TODO: Allow option to merge as new.
+# TODO: Add a button for filtering that allows for whole word searching
+
+
+class ExportDialog(QDialog):
+    def __init__(self, tables, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Export Tables")
+        self.setWindowIcon(QIcon("images/crm-icon-high-seas.png"))
+        self.setGeometry(100, 100, 500, 400)
+
+        self.tables = tables
+        self.output_location = ""
+
+        layout = QVBoxLayout()
+
+        # Header
+        header_label = QLabel("Export Tables")
+        header_label.setStyleSheet("font-size: 18pt; font-weight: bold;")
+        layout.addWidget(header_label)
+
+        # Explanation
+        explanation_label = QLabel(
+            "Select the tables to export, choose the output location, and specify the file names and extensions.")
+        explanation_label.setStyleSheet("font-size: 10pt; color: #888;")
+        layout.addWidget(explanation_label)
+
+        self.update_name_label = QLabel("Tables with red text were found in your output directory. "
+                                        "Consider changing the name before exporting.")
+        self.update_name_label.setStyleSheet("font-size: 10pt; color: #ff0000;")
+        self.update_name_label.setVisible(False)
+        layout.addWidget(self.update_name_label)
+
+        if not tables:
+            no_tables_label = QLabel("No tables available to export. Please add tables to the app first.")
+            no_tables_label.setStyleSheet("font-size: 12pt; color: #888;")
+            layout.addWidget(no_tables_label)
+            self.export_button = QPushButton("Close")
+            self.export_button.clicked.connect(self.close)
+            layout.addWidget(self.export_button)
+        else:
+            # Table List
+            self.table_list = QTableWidget()
+            self.table_list.setColumnCount(4)
+            self.table_list.setHorizontalHeaderLabels(["Table Name", "Spreadsheet Name", "Sheet Name", "Extension"])
+            self.table_list.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+            self.table_list.setEditTriggers(QAbstractItemView.EditTrigger.AllEditTriggers)
+            self.table_list.setToolTip("Select the tables to export.")
+            for row, (table_name, table_revision) in enumerate(tables.items()):
+                self.table_list.insertRow(row)
+                self.table_list.setItem(row, 0, QTableWidgetItem(table_name))
+                self.table_list.setItem(row, 1, QTableWidgetItem(table_revision.spreadsheet_name))
+                self.table_list.setItem(row, 2, QTableWidgetItem(table_revision.sheet_name))
+                self.table_list.setItem(row, 3, QTableWidgetItem(table_revision.extension))
+            self.table_list.resizeColumnsToContents()
+            self.table_list.horizontalHeader().setStretchLastSection(True)
+            self.table_list.itemChanged.connect(self.update_table_data)
+            layout.addWidget(self.table_list)
+
+            # Output Location
+            output_layout = QHBoxLayout()
+            self.output_line_edit = QLineEdit()
+            self.output_line_edit.setPlaceholderText("Output Location")
+            self.output_line_edit.setToolTip("Choose the output location for the exported tables.")
+            output_layout.addWidget(self.output_line_edit)
+            browse_button = QPushButton("Browse")
+            browse_button.clicked.connect(self.browse_output_location)
+            output_layout.addWidget(browse_button)
+            layout.addLayout(output_layout)
+
+            # Export Button
+            self.export_button = QPushButton("Export")
+            self.export_button.setToolTip("Export the selected tables to the specified output location.")
+            self.export_button.clicked.connect(self.export_selected_tables)
+            layout.addWidget(self.export_button)
+
+        self.setLayout(layout)
+
+    def browse_output_location(self):
+        options = QFileDialog.Option.DontResolveSymlinks | QFileDialog.Option.ShowDirsOnly
+        directory = QFileDialog.getExistingDirectory(self, "Select Output Location", self.output_location,
+                                                     options=options)
+        if directory:
+            self.output_location = directory
+            self.output_line_edit.setText(directory)
+            self.check_existing_files()
+
+    def check_existing_files(self):
+        if self.output_location:
+            existing_files = os.listdir(self.output_location)
+            show_update_label = False
+            for row in range(self.table_list.rowCount()):
+                spreadsheet_name = self.table_list.item(row, 1).text()
+                extension = self.table_list.item(row, 3).text()
+                file_name = f"{spreadsheet_name}{extension}"
+                if file_name in existing_files:
+                    for col in range(4):
+                        self.table_list.item(row, col).setForeground(QColor(255, 0, 0))
+                    self.table_list.item(row, 0).setToolTip(
+                        "A file with the same name already exists in the output location.")
+                    show_update_label = True
+                else:
+                    for col in range(4):
+                        self.table_list.item(row, col).setForeground(QColor(255, 255, 255))
+                    self.table_list.item(row, 0).setToolTip("")
+            self.update_name_label.setVisible(show_update_label)
+
+    def update_table_data(self, item):
+        row = item.row()
+        col = item.column()
+        old_table_name = self.table_list.item(row, 0).text()
+        table_revision = self.tables[old_table_name]
+
+        if col == 1:  # Spreadsheet Name
+            table_revision.spreadsheet_name = item.text()
+        elif col == 2:  # Sheet Name
+            table_revision.sheet_name = item.text()
+        elif col == 3:  # Extension
+            table_revision.extension = item.text()
+
+        # Update Table Name
+        new_table_name = f"{table_revision.spreadsheet_name} - {table_revision.sheet_name}"
+        table_revision.table_name = new_table_name
+
+        # Update the dictionary key
+        self.tables[new_table_name] = self.tables.pop(old_table_name)
+
+        # Update the table list item
+        self.table_list.item(row, 0).setText(new_table_name)
+
+        # Check if the table exists in the output folder
+        if self.output_location:
+            file_name = f"{table_revision.spreadsheet_name}{table_revision.extension}"
+            file_path = os.path.join(self.output_location, file_name)
+            if os.path.exists(file_path):
+                for col in range(4):
+                    self.table_list.item(row, col).setForeground(QColor(255, 0, 0))
+                self.table_list.item(row, 0).setToolTip(
+                    "A file with the same name already exists in the output location.")
+                self.update_name_label.setVisible(True)
+            else:
+                for col in range(4):
+                    self.table_list.item(row, col).setForeground(QColor(255, 255, 255))
+                self.table_list.item(row, 0).setToolTip("")
+
+    def export_selected_tables(self):
+        selected_rows = self.table_list.selectionModel().selectedRows()
+        if not selected_rows:
+            QMessageBox.warning(self, "No Tables Selected", "Please select at least one table to export.")
+            return
+
+        if not self.output_location:
+            QMessageBox.warning(self, "No Output Location", "Please specify an output location.")
+            return
+
+        open_files = []
+        file_data = {}
+        for row in [index.row() for index in selected_rows]:
+            table_name = self.table_list.item(row, 0).text()
+            spreadsheet_name = self.table_list.item(row, 1).text()
+            sheet_name = self.table_list.item(row, 2).text()
+            extension = self.table_list.item(row, 3).text()
+            file_name = f"{spreadsheet_name}{extension}"
+            file_path = os.path.join(self.output_location, file_name)
+            if os.path.exists(file_path):
+                if os.path.isfile(file_path) and sys.platform == 'win32':
+                    try:
+                        os.rename(file_path, file_path)
+                    except OSError as e:
+                        if e.errno == 13:
+                            open_files.append(file_name)
+
+            if file_name not in file_data:
+                file_data[file_name] = {}
+            file_data[file_name][sheet_name] = self.tables[table_name]
+
+        if open_files:
+            reply = QMessageBox.question(self, "Files Open",
+                                         "The following files are currently open:\n\n"
+                                         + "\n".join(open_files) +
+                                         "\n\nPlease save any unsaved changes in the open files. "
+                                         "This program will close the files and overwrite them. "
+                                         "Do you want to proceed?",
+                                         QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ok,
+                                         QMessageBox.StandardButton.Cancel)
+            if reply == QMessageBox.StandardButton.Cancel:
+                return
+            else:
+                for file_name in open_files:
+                    file_path = os.path.join(self.output_location, file_name)
+                    os.system(f'taskkill /F /IM "{os.path.basename(file_path)}"')
+
+        for file_name, sheet_data in file_data.items():
+            extension = os.path.splitext(file_name)[1]
+            file_path = os.path.join(self.output_location, file_name)
+
+            if extension == ".csv":
+                if len(sheet_data) > 1:
+                    QMessageBox.warning(self, "Multiple Sheets",
+                                        f"The file '{file_name}' contains multiple sheets. "
+                                        "Only the first sheet will be exported as CSV.")
+                sheet_name = next(iter(sheet_data))
+                sheet_data[sheet_name].revisions[sheet_data[sheet_name].current_revision].to_csv(file_path, index=False)
+            elif extension in [".xlsx", ".xls", ".xlsm"]:
+                if os.path.exists(file_path):
+                    # Create new file with _transformed appended to the name
+                    file_name, extension = os.path.splitext(file_path)
+                    with pd.ExcelWriter(f"{file_name}_transformed{extension}", engine='openpyxl') as writer:
+                        for sheet_name, table_revision in sheet_data.items():
+                            table_revision.revisions[table_revision.current_revision].to_excel(writer,
+                                                                                               sheet_name=sheet_name,
+                                                                                               index=False)
+                else:
+                    # Create new file
+                    with pd.ExcelWriter(file_path, engine='openpyxl') as writer:
+                        for sheet_name, table_revision in sheet_data.items():
+                            table_revision.revisions[table_revision.current_revision].to_excel(writer,
+                                                                                               sheet_name=sheet_name,
+                                                                                               index=False)
+            elif extension == ".txt":
+                if len(sheet_data) > 1:
+                    QMessageBox.warning(self, "Multiple Sheets",
+                                        f"The file '{file_name}' contains multiple sheets. "
+                                        "Only the first sheet will be exported as TXT.")
+                sheet_name = next(iter(sheet_data))
+                sheet_data[sheet_name].revisions[sheet_data[sheet_name].current_revision].to_csv(file_path, sep="\t",
+                                                                                                 index=False)
+            else:
+                QMessageBox.warning(self, "Unsupported Extension",
+                                    f"The extension '{extension}' is not supported for export.")
+                continue
+
+        QMessageBox.information(self, "Export Completed", "The selected tables have been exported successfully.")
+        self.close()
+
 
 class MergeDialog(QDialog):
     def __init__(self, tables, selected_table, parent=None):
@@ -25,11 +261,22 @@ class MergeDialog(QDialog):
 
         layout = QVBoxLayout()
 
+        # Header
+        header_label = QLabel("Merge Tables")
+        header_label.setStyleSheet("font-size: 18pt; font-weight: bold;")
+        layout.addWidget(header_label)
+
+        # Explanation
+        explanation_label = QLabel("Select two tables to merge and specify the join type.")
+        explanation_label.setStyleSheet("font-size: 10pt; color: #888;")
+        layout.addWidget(explanation_label)
+
         # Dropdowns
         dropdown_layout = QHBoxLayout()
         self.table1_dropdown = QComboBox()
         self.table1_dropdown.addItems(list(tables.keys()))
         self.table1_dropdown.setCurrentText(selected_table)
+        self.table1_dropdown.setToolTip("Select the first table to merge.")
         dropdown_layout.addWidget(QLabel("Table 1:"))
         dropdown_layout.addWidget(self.table1_dropdown)
         dropdown_layout.addStretch()
@@ -45,6 +292,7 @@ class MergeDialog(QDialog):
         dropdown_layout = QHBoxLayout()
         self.table2_dropdown = QComboBox()
         self.table2_dropdown.addItems([""] + list(tables.keys()))
+        self.table2_dropdown.setToolTip("Select the second table to merge.")
         dropdown_layout.addWidget(QLabel("Table 2:"))
         dropdown_layout.addWidget(self.table2_dropdown)
         dropdown_layout.addStretch()
@@ -60,12 +308,14 @@ class MergeDialog(QDialog):
         join_layout = QHBoxLayout()
         self.join_dropdown = QComboBox()
         self.join_dropdown.addItems(["Inner Join", "Left Join", "Right Join", "Outer Join"])
+        self.join_dropdown.setToolTip("Select the type of join to perform.")
         join_layout.addWidget(QLabel("Join Type:"))
         join_layout.addWidget(self.join_dropdown)
         layout.addLayout(join_layout)
 
         # Button
         self.merge_button = QPushButton("Merge")
+        self.merge_button.setToolTip("Perform the merge operation.")
         self.merge_button.clicked.connect(self.merge_tables)
         layout.addWidget(self.merge_button)
 
@@ -82,6 +332,7 @@ class MergeDialog(QDialog):
         table_view.setHorizontalHeaderLabels(data.columns)
         table_view.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         table_view.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectColumns)
+        table_view.setToolTip("Select a column to merge on.")
 
         for i in range(3):
             for j in range(len(data.columns)):
@@ -180,11 +431,22 @@ class AppendDialog(QDialog):
 
         layout = QVBoxLayout()
 
+        # Header
+        header_label = QLabel("Append Tables")
+        header_label.setStyleSheet("font-size: 18pt; font-weight: bold;")
+        layout.addWidget(header_label)
+
+        # Explanation
+        explanation_label = QLabel("Select two tables to append and specify the append direction.")
+        explanation_label.setStyleSheet("font-size: 10pt; color: #888;")
+        layout.addWidget(explanation_label)
+
         # Dropdowns
         dropdown_layout = QHBoxLayout()
         self.table1_dropdown = QComboBox()
         self.table1_dropdown.addItems(list(tables.keys()))
         self.table1_dropdown.setCurrentText(selected_table)
+        self.table1_dropdown.setToolTip("Select the first table to append.")
         dropdown_layout.addWidget(QLabel("Table 1:"))
         dropdown_layout.addWidget(self.table1_dropdown)
         dropdown_layout.addStretch()
@@ -200,6 +462,7 @@ class AppendDialog(QDialog):
         dropdown_layout = QHBoxLayout()
         self.table2_dropdown = QComboBox()
         self.table2_dropdown.addItems([""] + list(tables.keys()))
+        self.table2_dropdown.setToolTip("Select the second table to append.")
         dropdown_layout.addWidget(QLabel("Table 2:"))
         dropdown_layout.addWidget(self.table2_dropdown)
         dropdown_layout.addStretch()
@@ -215,12 +478,14 @@ class AppendDialog(QDialog):
         direction_layout = QHBoxLayout()
         self.direction_dropdown = QComboBox()
         self.direction_dropdown.addItems(["Vertically", "Horizontally"])
+        self.direction_dropdown.setToolTip("Select the direction to append the tables.")
         direction_layout.addWidget(QLabel("Append Direction:"))
         direction_layout.addWidget(self.direction_dropdown)
         layout.addLayout(direction_layout)
 
         # Button
         self.append_button = QPushButton("Append")
+        self.append_button.setToolTip("Perform the append operation.")
         self.append_button.clicked.connect(self.append_tables)
         layout.addWidget(self.append_button)
 
@@ -324,6 +589,9 @@ class TableRevision:
         self.data = data
         self.revisions = [data]
         self.current_revision = 0
+        self.spreadsheet_name = ""
+        self.sheet_name = ""
+        self.extension = ""
 
     def add_revision(self, data):
         if len(self.revisions) >= 10:
@@ -521,6 +789,10 @@ class SpreadsheetApp(QMainWindow):
         add_table_action.triggered.connect(self.add_table)
         file_menu.addAction(add_table_action)
 
+        export_action = QAction("Export Table(s)", self)
+        export_action.triggered.connect(self.export_tables)
+        file_menu.addAction(export_action)
+
         operations_menu = menubar.addMenu("Operations")
 
         merge_action = QAction("Merge", self)
@@ -580,25 +852,63 @@ class SpreadsheetApp(QMainWindow):
 
     def add_table(self):
         options = QFileDialog.Option.ReadOnly
-        file_path, _ = QFileDialog.getOpenFileName(self, "Add Table", "", "Excel files (*.xlsx);;CSV files (*.csv)",
+        file_path, _ = QFileDialog.getOpenFileName(self, "Add Table", "",
+                                                   "Excel files (*.xlsx *.xls *.xlsm);;CSV files (*.csv);;Text files (*.txt)",
                                                    options=options)
         if file_path:
-            if file_path.endswith(".xlsx"):
+            file_name = os.path.basename(file_path)
+            file_name_without_ext, extension = os.path.splitext(file_name)
+            if extension == ".txt":
+                data = pd.read_csv(file_path, sep="\t")
+                sheet_name = "Sheet1"
+            elif extension == ".csv":
+                data = pd.read_csv(file_path)
+                sheet_name = "Sheet1"
+            else:
                 excel_file = pd.ExcelFile(file_path)
                 sheet_names = excel_file.sheet_names
                 for sheet_name in sheet_names:
                     data = excel_file.parse(sheet_name)
-                    table_name = f"{file_path.split('/')[-1]} - {sheet_name}"
+                    table_name = f"{file_name_without_ext} - {sheet_name}"
+
+                    if table_name in self.tables:
+                        pattern = rf"{table_name}\s*\((\d+)\)"
+                        max_number = 0
+                        for existing_table_name in self.tables:
+                            match = re.match(pattern, existing_table_name)
+                            if match:
+                                number = int(match.group(1))
+                                max_number = max(max_number, number)
+                        # Increment the number for the new table name
+                        if max_number == 0:
+                            table_name = f"{table_name} (1)"
+                        else:
+                            table_name = f"{table_name} ({max_number + 1})"
+
                     self.tables[table_name] = TableRevision(data)
+                    self.tables[table_name].spreadsheet_name = file_name_without_ext
+                    self.tables[table_name].sheet_name = sheet_name
+                    self.tables[table_name].extension = extension if extension else ".xlsx"
                     item = QListWidgetItem(table_name)
                     self.file_list.addItem(item)
                     self.file_list.setCurrentItem(item)
-            elif file_path.endswith(".csv"):
-                data = pd.read_csv(file_path)
-                table_name = file_path.split("/")[-1]
-                self.tables[table_name] = TableRevision(data)
-                self.file_list.addItem(table_name)
-            self.show_table(self.file_list.currentItem())
+                self.show_table(self.file_list.currentItem())
+                return
+            table_name = file_name_without_ext
+            self.tables[table_name] = TableRevision(data)
+            self.tables[table_name].spreadsheet_name = file_name_without_ext
+            self.tables[table_name].sheet_name = sheet_name
+            self.tables[table_name].extension = extension if extension else ".xlsx"
+            self.file_list.addItem(table_name)
+        self.show_table(self.file_list.currentItem())
+
+    def export_tables(self):
+        if not self.tables:
+            QMessageBox.warning(self, "No Tables", "No tables available to export. Please add tables to the app first.")
+            return
+
+        dialog = ExportDialog(self.tables, parent=self)
+        dialog.exec()
 
     def populate_table(self, data):
         self.table_view.clear()
