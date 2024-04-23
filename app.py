@@ -9,7 +9,33 @@ from PyQt6.QtWidgets import *
 
 
 # TODO: What the hell am I doing with the loading window? Create a gif maybe?
-# TODO: Update to use typehints, docstrings, and comments (MergeDialog, AppendDialog, TableRevision, SpreadsheetApp)
+
+
+class LoadingDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Loading...")
+        self.setFixedSize(200, 100)
+        self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create a QLabel to hold the loading GIF
+        self.label = QLabel(self)
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.label)
+
+        # Load the loading GIF
+        movie = QMovie("path/to/loading.gif")
+        self.label.setMovie(movie)
+        movie.start()
+
+    def keyPressEvent(self, event):
+        # Prevent the dialog from being closed by pressing Esc key
+        if event.key() != Qt.Key.Key_Escape:
+            super().keyPressEvent(event)
 
 class ExportDialog(QDialog):
     """
@@ -26,7 +52,8 @@ class ExportDialog(QDialog):
     - update_table_data: Updates the table data when the user modifies the table list.
     - export_selected_tables: Exports the selected tables to the specified output location.
     """
-    def __init__(self, tables, parent=None):
+
+    def __init__(self, tables: Dict[str, 'TableRevision'], parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setWindowTitle("Export Tables")
         self.setWindowIcon(QIcon("images/crm-icon-high-seas.png"))
@@ -268,7 +295,8 @@ class PivotDialog(QDialog):
     - __init__: Initializes the PivotDialog with the necessary components and layout.
     - get_values_column: Retrieves the selected values column from the dropdown menu.
     """
-    def __init__(self, data, selected_column, parent=None):
+
+    def __init__(self, data: pd.DataFrame, selected_column: str, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setWindowTitle("Pivot Table")
         self.setGeometry(100, 100, 400, 200)
@@ -307,7 +335,25 @@ class PivotDialog(QDialog):
 
 
 class MergeDialog(QDialog):
-    def __init__(self, tables, selected_table, parent=None):
+    """
+    A dialog for merging tables in the Spreadsheet Application.
+
+    The MergeDialog allows the user to select two tables to merge, specify the join type,
+    and choose the columns to merge on. It provides a preview of the selected tables and
+    displays information about different join types.
+
+    Functions:
+    - __init__: Initializes the MergeDialog with the necessary components and layout.
+    - create_table_view: Creates a table view widget for displaying a preview of the selected table.
+    - update_table1_view: Updates the table view for the first selected table.
+    - update_table2_view: Updates the table view for the second selected table.
+    - update_table_view: Updates the table view with the given table revision data.
+    - update_selected_column: Updates the selected column when the user selects a column in the table views.
+    - show_join_info: Displays information about different join types in a scrollable dialog.
+    - accept: Performs the merge operation when the user accepts the dialog.
+    """
+
+    def __init__(self, tables: Dict[str, 'TableRevision'], selected_table: str, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.merged_data = None
         self.setWindowTitle("Merge Tables")
@@ -586,7 +632,25 @@ class MergeDialog(QDialog):
 
 
 class AppendDialog(QDialog):
-    def __init__(self, tables, selected_table, parent=None):
+    """
+    A dialog for appending tables in the Spreadsheet Application.
+
+    The AppendDialog allows the user to select two tables to append, specify the append direction,
+    and choose the columns to append. It provides a preview of the selected tables and
+    displays information about different append directions.
+
+    Functions:
+    - __init__: Initializes the AppendDialog with the necessary components and layout.
+    - create_table_view: Creates a table view widget for displaying a preview of the selected table.
+    - update_table1_view: Updates the table view for the first selected table.
+    - update_table2_view: Updates the table view for the second selected table.
+    - update_table_view: Updates the table view with the given table revision data.
+    - update_selected_column: Updates the selected column when the user selects a column in the table views.
+    - show_append_info: Displays information about different append directions in a scrollable dialog.
+    - accept: Performs the append operation when the user accepts the dialog.
+    """
+
+    def __init__(self, tables: Dict[str, 'TableRevision'], selected_table: str, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.appended_data = None
         self.setWindowTitle("Append Tables")
@@ -820,7 +884,20 @@ class AppendDialog(QDialog):
 
 
 class TableRevision:
-    def __init__(self, data):
+    """
+    Represents a revision of a table in the Spreadsheet Application.
+
+    The TableRevision class stores the data, revisions, and current revision of a table.
+    It provides methods to add a new revision, undo changes, and redo changes.
+
+    Functions:
+    - __init__: Initializes the TableRevision with the given data.
+    - add_revision: Adds a new revision to the table.
+    - undo: Undoes the last revision made to the table.
+    - redo: Redoes the last undone revision made to the table.
+    """
+
+    def __init__(self, data: pd.DataFrame):
         self.data = data
         self.revisions = [data]
         self.current_revision = 0
@@ -905,6 +982,8 @@ class SpreadsheetApp(QMainWindow):
         self.tables = {}
         self.pressed_keys = set()
         self.current_showing_table = None
+
+        self.loading_dialog = LoadingDialog(self)
 
         self.init_ui()
 
@@ -1132,6 +1211,7 @@ class SpreadsheetApp(QMainWindow):
             self.table_view.setRowHidden(row, not match)
 
     def add_table(self):
+        self.loading_dialog.show()
         options = QFileDialog.Option.ReadOnly
         file_path, _ = QFileDialog.getOpenFileName(self, "Add Table", "",
                                                    "Excel files (*.xlsx *.xls *.xlsm);;CSV files (*.csv);;"
@@ -1175,6 +1255,7 @@ class SpreadsheetApp(QMainWindow):
                     self.file_list.addItem(item)
                     self.file_list.setCurrentItem(item)
                 self.show_table(self.file_list.currentItem())
+                self.loading_dialog.hide()
                 return
             table_name = file_name_without_ext
             self.tables[table_name] = TableRevision(data)
@@ -1183,6 +1264,7 @@ class SpreadsheetApp(QMainWindow):
             self.tables[table_name].extension = extension if extension else ".xlsx"
             self.file_list.addItem(table_name)
         self.show_table(self.file_list.currentItem())
+        self.loading_dialog.hide()
 
     def export_tables(self):
         if not self.tables:
