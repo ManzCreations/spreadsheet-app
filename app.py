@@ -1,22 +1,31 @@
 import os
-import sys
 import re
+import sys
 
 import pandas as pd
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QAction, QFont, QIcon, QColor
+from PyQt6.QtGui import QAction, QFont, QIcon, QColor, QPixmap
 from PyQt6.QtWidgets import *
-from openpyxl import load_workbook
-from openpyxl.utils.dataframe import dataframe_to_rows
 
 
 # TODO: What the hell am I doing with the loading window? Create a gif maybe?
-# TODO: Update pivoting and un-pivoting
-# TODO: Allow option to merge as new.
-# TODO: Add a button for filtering that allows for whole word searching
-
+# TODO: Update to use typehints, docstrings, and comments (MergeDialog, AppendDialog, TableRevision, SpreadsheetApp)
 
 class ExportDialog(QDialog):
+    """
+    A dialog for exporting tables from the Spreadsheet Application.
+
+    The ExportDialog allows the user to select tables to export, choose the output location,
+    and specify file names and extensions. It provides options to update table names and
+    handles the export process for different file formats.
+
+    Functions:
+    - __init__: Initializes the ExportDialog with the necessary components and layout.
+    - browse_output_location: Opens a file dialog for the user to select the output location.
+    - check_existing_files: Checks if the selected tables already exist in the output location.
+    - update_table_data: Updates the table data when the user modifies the table list.
+    - export_selected_tables: Exports the selected tables to the specified output location.
+    """
     def __init__(self, tables, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Export Tables")
@@ -248,9 +257,59 @@ class ExportDialog(QDialog):
         self.close()
 
 
+class PivotDialog(QDialog):
+    """
+    A dialog for selecting pivot options in the Spreadsheet Application.
+
+    The PivotDialog allows the user to choose the values column for pivoting a selected column.
+    It displays the selected column name and provides a dropdown menu to select the values column.
+
+    Functions:
+    - __init__: Initializes the PivotDialog with the necessary components and layout.
+    - get_values_column: Retrieves the selected values column from the dropdown menu.
+    """
+    def __init__(self, data, selected_column, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Pivot Table")
+        self.setGeometry(100, 100, 400, 200)
+
+        layout = QVBoxLayout()
+
+        # Header
+        header_label = QLabel("Pivot Table")
+        header_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+        layout.addWidget(header_label)
+
+        # Explanation
+        explanation_label = QLabel(f"Pivoting the selected column: {selected_column}")
+        explanation_label.setWordWrap(True)
+        explanation_label.setToolTip("The selected column will be used as the new column headers.")
+        layout.addWidget(explanation_label)
+
+        # Values Column Dropdown
+        values_label = QLabel("Select the values column:")
+        values_label.setToolTip("Choose the column that will provide the values for the pivoted cells.")
+        layout.addWidget(values_label)
+
+        self.values_dropdown = QComboBox()
+        self.values_dropdown.addItems(data.columns)
+        layout.addWidget(self.values_dropdown)
+
+        # Accept Button
+        self.accept_button = QPushButton("Accept")
+        self.accept_button.clicked.connect(self.accept)
+        layout.addWidget(self.accept_button)
+
+        self.setLayout(layout)
+
+    def get_values_column(self):
+        return self.values_dropdown.currentText()
+
+
 class MergeDialog(QDialog):
     def __init__(self, tables, selected_table, parent=None):
         super().__init__(parent)
+        self.merged_data = None
         self.setWindowTitle("Merge Tables")
         self.setWindowIcon(QIcon("images/crm-icon-high-seas.png"))
         self.setGeometry(100, 100, 800, 500)
@@ -311,12 +370,19 @@ class MergeDialog(QDialog):
         self.join_dropdown.setToolTip("Select the type of join to perform.")
         join_layout.addWidget(QLabel("Join Type:"))
         join_layout.addWidget(self.join_dropdown)
+
+        # Info Button
+        info_button = QPushButton()
+        info_button.setIcon(QIcon("images/iconmonstr-info-9-240.png"))
+        info_button.clicked.connect(self.show_join_info)
+        join_layout.addWidget(info_button)
+
         layout.addLayout(join_layout)
 
         # Button
         self.merge_button = QPushButton("Merge")
         self.merge_button.setToolTip("Perform the merge operation.")
-        self.merge_button.clicked.connect(self.merge_tables)
+        self.merge_button.clicked.connect(self.accept)
         layout.addWidget(self.merge_button)
 
         self.setLayout(layout)
@@ -395,7 +461,108 @@ class MergeDialog(QDialog):
             if selected_indexes:
                 self.selected_column2 = selected_indexes[0].column()
 
-    def merge_tables(self):
+    def show_join_info(self):
+        info_dialog = QDialog(self)
+        info_dialog.setWindowTitle("Join Type Information")
+        info_dialog.setGeometry(100, 100, 600, 400)
+
+        scroll_area = QScrollArea(info_dialog)
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget(scroll_area)
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_area.setWidget(scroll_content)
+
+        main_layout = QVBoxLayout(info_dialog)
+        main_layout.addWidget(scroll_area)
+
+        # Introduction
+        intro_label = QLabel("What Are Joins?")
+        intro_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+        scroll_layout.addWidget(intro_label)
+
+        intro_text = QLabel(
+            "Joins allow you to fetch data that is scattered across multiple tables in a database. "
+            "They enable you to combine rows from different tables based on a related column between them.")
+        intro_text.setWordWrap(True)
+        scroll_layout.addWidget(intro_text)
+
+        # Inner Join
+        inner_join_label = QLabel("Inner Join")
+        inner_join_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        scroll_layout.addWidget(inner_join_label)
+
+        inner_join_text = QLabel("An inner join returns only the rows that have matching values in both tables.")
+        inner_join_text.setWordWrap(True)
+        scroll_layout.addWidget(inner_join_text)
+
+        inner_join_example = QLabel("Example: Table1 INNER JOIN Table2 ON Table1.ID = Table2.ID")
+        inner_join_example.setWordWrap(True)
+        scroll_layout.addWidget(inner_join_example)
+
+        inner_join_image = QLabel()
+        inner_join_image.setPixmap(QPixmap("images/inner_join.png"))
+        scroll_layout.addWidget(inner_join_image)
+
+        # Left Join
+        left_join_label = QLabel("Left Join")
+        left_join_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        scroll_layout.addWidget(left_join_label)
+
+        left_join_text = QLabel(
+            "A left join returns all the rows from the left table and the matching rows from the right table. "
+            "If there is no match, NULL values are returned for the right table.")
+        left_join_text.setWordWrap(True)
+        scroll_layout.addWidget(left_join_text)
+
+        left_join_example = QLabel("Example: Table1 LEFT JOIN Table2 ON Table1.ID = Table2.ID")
+        left_join_example.setWordWrap(True)
+        scroll_layout.addWidget(left_join_example)
+
+        left_join_image = QLabel()
+        left_join_image.setPixmap(QPixmap("images/left_join.png"))
+        scroll_layout.addWidget(left_join_image)
+
+        # Right Join
+        right_join_label = QLabel("Right Join")
+        right_join_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        scroll_layout.addWidget(right_join_label)
+
+        right_join_text = QLabel(
+            "A right join returns all the rows from the right table and the matching rows from the left table. "
+            "If there is no match, NULL values are returned for the left table.")
+        right_join_text.setWordWrap(True)
+        scroll_layout.addWidget(right_join_text)
+
+        right_join_example = QLabel("Example: Table1 RIGHT JOIN Table2 ON Table1.ID = Table2.ID")
+        right_join_example.setWordWrap(True)
+        scroll_layout.addWidget(right_join_example)
+
+        right_join_image = QLabel()
+        right_join_image.setPixmap(QPixmap("images/right_join.jpg"))
+        scroll_layout.addWidget(right_join_image)
+
+        # Outer Join
+        outer_join_label = QLabel("Outer Join")
+        outer_join_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        scroll_layout.addWidget(outer_join_label)
+
+        outer_join_text = QLabel(
+            "An outer join returns all the rows from both tables, including the non-matching rows. "
+            "NULL values are used for the missing values.")
+        outer_join_text.setWordWrap(True)
+        scroll_layout.addWidget(outer_join_text)
+
+        outer_join_example = QLabel("Example: Table1 FULL OUTER JOIN Table2 ON Table1.ID = Table2.ID")
+        outer_join_example.setWordWrap(True)
+        scroll_layout.addWidget(outer_join_example)
+
+        outer_join_image = QLabel()
+        outer_join_image.setPixmap(QPixmap("images/outer_join.png"))
+        scroll_layout.addWidget(outer_join_image)
+
+        info_dialog.exec()
+
+    def accept(self):
         table1_name = self.table1_dropdown.currentText()
         table2_name = self.table2_dropdown.currentText()
         table1_revision = self.tables[table1_name]
@@ -413,14 +580,15 @@ class MergeDialog(QDialog):
 
         join_type = self.join_dropdown.currentText().lower().split(" ")[0]
 
-        merged_data = pd.merge(table1_data, table2_data, left_on=merge_column1, right_on=merge_column2, how=join_type)
-        self.parent().populate_table(merged_data)
-        self.close()
+        self.merged_data = pd.merge(table1_data, table2_data, left_on=merge_column1, right_on=merge_column2,
+                                    how=join_type)
+        super().accept()
 
 
 class AppendDialog(QDialog):
     def __init__(self, tables, selected_table, parent=None):
         super().__init__(parent)
+        self.appended_data = None
         self.setWindowTitle("Append Tables")
         self.setWindowIcon(QIcon("images/crm-icon-high-seas.png"))
         self.setGeometry(100, 100, 800, 500)
@@ -481,12 +649,19 @@ class AppendDialog(QDialog):
         self.direction_dropdown.setToolTip("Select the direction to append the tables.")
         direction_layout.addWidget(QLabel("Append Direction:"))
         direction_layout.addWidget(self.direction_dropdown)
+
+        # Info Button
+        info_button = QPushButton()
+        info_button.setIcon(QIcon("images/iconmonstr-info-9-240.png"))
+        info_button.clicked.connect(self.show_append_info)
+        direction_layout.addWidget(info_button)
+
         layout.addLayout(direction_layout)
 
         # Button
         self.append_button = QPushButton("Append")
         self.append_button.setToolTip("Perform the append operation.")
-        self.append_button.clicked.connect(self.append_tables)
+        self.append_button.clicked.connect(self.accept)
         layout.addWidget(self.append_button)
 
         self.setLayout(layout)
@@ -564,7 +739,68 @@ class AppendDialog(QDialog):
             if selected_indexes:
                 self.selected_column2 = selected_indexes[0].column()
 
-    def append_tables(self):
+    def show_append_info(self):
+        info_dialog = QDialog(self)
+        info_dialog.setWindowTitle("Append Direction Information")
+        info_dialog.setGeometry(100, 100, 600, 400)
+
+        scroll_area = QScrollArea(info_dialog)
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget(scroll_area)
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_area.setWidget(scroll_content)
+
+        main_layout = QVBoxLayout(info_dialog)
+        main_layout.addWidget(scroll_area)
+
+        # Introduction
+        intro_label = QLabel("Append Directions")
+        intro_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+        scroll_layout.addWidget(intro_label)
+
+        intro_text = QLabel(
+            "Append allows you to combine data from multiple tables by stacking them either "
+            "vertically or horizontally.")
+        intro_text.setWordWrap(True)
+        scroll_layout.addWidget(intro_text)
+
+        # Vertical Append
+        vertical_append_label = QLabel("Vertical Append")
+        vertical_append_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        scroll_layout.addWidget(vertical_append_label)
+
+        vertical_append_text = QLabel(
+            "A vertical append stacks the rows of the tables on top of each other. "
+            "The resulting table will have the same columns as the input tables.")
+        vertical_append_text.setWordWrap(True)
+        scroll_layout.addWidget(vertical_append_text)
+
+        vertical_append_example = QLabel("Example: Table1 UNION Table2")
+        vertical_append_example.setWordWrap(True)
+        scroll_layout.addWidget(vertical_append_example)
+
+        # Horizontal Append
+        horizontal_append_label = QLabel("Horizontal Append")
+        horizontal_append_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        scroll_layout.addWidget(horizontal_append_label)
+
+        horizontal_append_text = QLabel(
+            "A horizontal append combines the columns of the tables side by side. "
+            "The resulting table will have the same number of rows as the input tables.")
+        horizontal_append_text.setWordWrap(True)
+        scroll_layout.addWidget(horizontal_append_text)
+
+        horizontal_append_example = QLabel("Example: Table1 JOIN Table2")
+        horizontal_append_example.setWordWrap(True)
+        scroll_layout.addWidget(horizontal_append_example)
+
+        append_image = QLabel()
+        append_image.setPixmap(QPixmap("images/appends.png"))
+        scroll_layout.addWidget(append_image)
+
+        info_dialog.exec()
+
+    def accept(self):
         table1_name = self.table1_dropdown.currentText()
         table2_name = self.table2_dropdown.currentText()
         table1_revision = self.tables[table1_name]
@@ -576,12 +812,11 @@ class AppendDialog(QDialog):
         append_direction = self.direction_dropdown.currentText().lower()
 
         if append_direction == "vertically":
-            appended_data = pd.concat([table1_data, table2_data], ignore_index=True)
+            self.appended_data = pd.concat([table1_data, table2_data], ignore_index=True)
         else:
-            appended_data = pd.concat([table1_data, table2_data], axis=1)
+            self.appended_data = pd.concat([table1_data, table2_data], axis=1)
 
-        self.parent().populate_table(appended_data)
-        self.close()
+        super().accept()
 
 
 class TableRevision:
@@ -655,6 +890,14 @@ class SpreadsheetApp(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        self.wButton = None
+        self.ccButton = None
+        self.swButton = None
+        self.filterTextEditor = None
+        self.filterSectionHeader = None
+        self.filterRowLayout = None
+        self.table_view = None
+        self.file_list = None
         self.setWindowTitle("Spreadsheet Application")
         self.setWindowIcon(QIcon("images/crm-icon-high-seas.png"))
         self.setGeometry(100, 100, 800, 600)
@@ -761,7 +1004,8 @@ class SpreadsheetApp(QMainWindow):
         self.swButton.setCheckable(True)
         self.swButton.clicked.connect(self.updateButtonStyle)
         self.swButton.setToolTip(
-            "Starts With: Select this button if you want to filter only to words that start with the letters/numbers in your filter criteria.")
+            "Starts With: Select this button if you want to filter only to words that start with "
+            "the letters/numbers in your filter criteria.")
         self.filterRowLayout.addWidget(self.swButton)
 
         # Match Case Button
@@ -771,6 +1015,13 @@ class SpreadsheetApp(QMainWindow):
         self.ccButton.setToolTip(
             "Match Case: Select this button if you want to match the case that you have in the filter criteria.")
         self.filterRowLayout.addWidget(self.ccButton)
+
+        # Entire Word Button
+        self.wButton = QPushButton("W")
+        self.wButton.setCheckable(True)
+        self.wButton.clicked.connect(self.updateButtonStyle)
+        self.wButton.setToolTip("Entire Word: Select this button to filter only exact word matches.")
+        self.filterRowLayout.addWidget(self.wButton)
 
         main_layout.addLayout(self.filterRowLayout)
 
@@ -795,17 +1046,41 @@ class SpreadsheetApp(QMainWindow):
 
         operations_menu = menubar.addMenu("Operations")
 
-        merge_action = QAction("Merge", self)
-        merge_action.triggered.connect(self.merge_tables)
-        operations_menu.addAction(merge_action)
+        merge_menu = QMenu("Merge", self)
+        merge_as_same_action = QAction("Merge as Same", self)
+        merge_as_same_action.triggered.connect(lambda: self.merge_tables(as_same=True))
+        merge_menu.addAction(merge_as_same_action)
+        merge_as_new_action = QAction("Merge as New", self)
+        merge_as_new_action.triggered.connect(lambda: self.merge_tables(as_same=False))
+        merge_menu.addAction(merge_as_new_action)
+        operations_menu.addMenu(merge_menu)
 
-        append_action = QAction("Append", self)
-        append_action.triggered.connect(self.append_tables)
-        operations_menu.addAction(append_action)
+        append_menu = QMenu("Append", self)
+        append_as_same_action = QAction("Append as Same", self)
+        append_as_same_action.triggered.connect(lambda: self.append_tables(as_same=True))
+        append_menu.addAction(append_as_same_action)
+        append_as_new_action = QAction("Append as New", self)
+        append_as_new_action.triggered.connect(lambda: self.append_tables(as_same=False))
+        append_menu.addAction(append_as_new_action)
+        operations_menu.addMenu(append_menu)
 
-        pivot_action = QAction("Pivot", self)
-        pivot_action.triggered.connect(self.pivot_table)
-        operations_menu.addAction(pivot_action)
+        pivot_menu = QMenu("Pivot", self)
+        pivot_as_same_action = QAction("Pivot as Same", self)
+        pivot_as_same_action.triggered.connect(lambda: self.pivot_table(as_same=True))
+        pivot_menu.addAction(pivot_as_same_action)
+        pivot_as_new_action = QAction("Pivot as New", self)
+        pivot_as_new_action.triggered.connect(lambda: self.pivot_table(as_same=False))
+        pivot_menu.addAction(pivot_as_new_action)
+        operations_menu.addMenu(pivot_menu)
+
+        unpivot_menu = QMenu("Unpivot", self)
+        unpivot_as_same_action = QAction("Unpivot as Same", self)
+        unpivot_as_same_action.triggered.connect(lambda: self.unpivot_table(as_same=True))
+        unpivot_menu.addAction(unpivot_as_same_action)
+        unpivot_as_new_action = QAction("Unpivot as New", self)
+        unpivot_as_new_action.triggered.connect(lambda: self.unpivot_table(as_same=False))
+        unpivot_menu.addAction(unpivot_as_new_action)
+        operations_menu.addMenu(unpivot_menu)
 
     def updateButtonStyle(self):
         """
@@ -816,6 +1091,7 @@ class SpreadsheetApp(QMainWindow):
             sender.setStyleSheet("background-color: #4d8d9c;")  # Darker color when checked
         else:
             sender.setStyleSheet("")  # Revert to default stylesheet
+        self.filterTable()
 
     def filterTable(self):
         """
@@ -844,16 +1120,22 @@ class SpreadsheetApp(QMainWindow):
                 filter_text = filter_text.lower()
                 cell_value = cell_value.lower()
 
+            # Adjust for "Entire Word" functionality based on W button
+            if self.wButton.isChecked():
+                match = cell_value == filter_text
             # Adjust for "Starts With" functionality based on Sw button
-            if self.swButton.isChecked():
-                self.table_view.setRowHidden(row, not cell_value.startswith(filter_text))
+            elif self.swButton.isChecked():
+                match = cell_value.startswith(filter_text)
             else:
-                self.table_view.setRowHidden(row, filter_text not in cell_value)
+                match = filter_text in cell_value
+
+            self.table_view.setRowHidden(row, not match)
 
     def add_table(self):
         options = QFileDialog.Option.ReadOnly
         file_path, _ = QFileDialog.getOpenFileName(self, "Add Table", "",
-                                                   "Excel files (*.xlsx *.xls *.xlsm);;CSV files (*.csv);;Text files (*.txt)",
+                                                   "Excel files (*.xlsx *.xls *.xlsm);;CSV files (*.csv);;"
+                                                   "Text files (*.txt)",
                                                    options=options)
         if file_path:
             file_name = os.path.basename(file_path)
@@ -1123,32 +1405,155 @@ class SpreadsheetApp(QMainWindow):
             table_revision.add_revision(data)
             self.populate_table(data)
 
-    def merge_tables(self):
+    def merge_tables(self, as_same=True):
         if len(self.tables) < 2:
             QMessageBox.warning(self, "Error", "At least two tables are required for merging.")
             return
 
         selected_table = self.file_list.currentItem().text()
         dialog = MergeDialog(self.tables, selected_table, parent=self)  # Pass self as the parent
-        dialog.exec()
+        result = dialog.exec()
 
-    def append_tables(self):
+        if result == QDialog.DialogCode.Accepted:
+            merged_data = dialog.merged_data
+            if as_same:
+                table_name = self.file_list.currentItem().text()
+                table_revision = self.tables[table_name]
+                table_revision.add_revision(merged_data)  # Add merged data as a new revision
+                self.populate_table(merged_data)
+                current_item = self.file_list.currentItem()
+                self.file_list.setCurrentItem(current_item)
+                self.show_table(current_item)
+            else:
+                new_table_name = self.generate_new_table_name("Query")
+                self.tables[new_table_name] = TableRevision(merged_data)
+                new_item = QListWidgetItem(new_table_name)
+                self.file_list.addItem(new_item)
+                # Select the new table in the file list and show it
+                self.file_list.setCurrentItem(new_item)
+                self.show_table(new_item)
+
+    def append_tables(self, as_same=True):
         if len(self.tables) < 2:
             QMessageBox.warning(self, "Error", "At least two tables are required for appending.")
             return
 
         selected_table = self.file_list.currentItem().text()
         dialog = AppendDialog(self.tables, selected_table, parent=self)  # Pass self as the parent
-        dialog.exec()
+        result = dialog.exec()
 
-    def pivot_table(self):
+        if result == QDialog.DialogCode.Accepted:
+            appended_data = dialog.appended_data
+            if as_same:
+                table_name = self.file_list.currentItem().text()
+                table_revision = self.tables[table_name]
+                table_revision.add_revision(appended_data)  # Add appended data as a new revision
+                self.populate_table(appended_data)
+                current_item = self.file_list.currentItem()
+                self.file_list.setCurrentItem(current_item)
+                self.show_table(current_item)
+            else:
+                new_table_name = self.generate_new_table_name("Query")
+                self.tables[new_table_name] = TableRevision(appended_data)
+                new_item = QListWidgetItem(new_table_name)
+                self.file_list.addItem(new_item)
+                # Select the new table in the file list and show it
+                self.file_list.setCurrentItem(new_item)
+                self.show_table(new_item)
+
+    def pivot_table(self, as_same=True):
         if len(self.tables) == 0:
             QMessageBox.warning(self, "Error", "No tables available for pivoting.")
             return
 
-        data = list(self.tables.values())[0]
-        pivot_data = data.pivot_table(index=data.columns[0], values=data.columns[1], aggfunc="sum")
-        self.populate_table(pivot_data)
+        selected_indexes = self.table_view.selectedIndexes()
+        if len(selected_indexes) == 0:
+            QMessageBox.warning(self, "Error", "Please select a single column to pivot.")
+            return
+
+        selected_column_with_dtype = self.table_view.horizontalHeaderItem(selected_indexes[0].column()).text()
+        selected_column = selected_column_with_dtype.split(" (")[0]  # Extract column name without data type
+
+        selected_table = self.file_list.currentItem().text()
+        table_revision = self.tables[selected_table]
+        data = table_revision.revisions[table_revision.current_revision]
+
+        dialog = PivotDialog(data, selected_column, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            values_column_with_dtype = dialog.get_values_column()
+            values_column = values_column_with_dtype.split(" (")[0]  # Extract column name without data type
+
+            if values_column == selected_column:
+                QMessageBox.warning(self, "Error", "The values column cannot be the same as the selected column.")
+                return
+
+            # Perform the pivot operation
+            pivot_data = data.pivot_table(index=data.columns[0], columns=selected_column, values=values_column,
+                                          aggfunc="sum")
+
+            if as_same:
+                table_revision.add_revision(pivot_data)  # Add pivot data as a new revision
+                self.populate_table(pivot_data)
+                current_item = self.file_list.currentItem()
+                self.file_list.setCurrentItem(current_item)
+                self.show_table(current_item)
+            else:
+                new_table_name = self.generate_new_table_name("Query")
+                self.tables[new_table_name] = TableRevision(pivot_data)
+                new_item = QListWidgetItem(new_table_name)
+                self.file_list.addItem(new_item)
+                self.file_list.setCurrentItem(new_item)
+                self.show_table(new_item)
+
+    def generate_new_table_name(self, prefix):
+        i = 1
+        while True:
+            new_table_name = f"{prefix} {i}"
+            if new_table_name not in self.tables:
+                return new_table_name
+            i += 1
+
+    def unpivot_table(self, as_same=True):
+        if len(self.tables) == 0:
+            QMessageBox.warning(self, "Error", "No tables available for unpivoting.")
+            return
+
+        selected_indexes = self.table_view.selectedIndexes()
+        if len(selected_indexes) < 2:
+            QMessageBox.warning(self, "Error", "Please select multiple columns to unpivot.")
+            return
+
+        selected_table = self.file_list.currentItem().text()
+        table_revision = self.tables[selected_table]
+        data = table_revision.revisions[table_revision.current_revision]
+
+        selected_columns = [index.column() for index in selected_indexes]
+        unique_columns = list(set(selected_columns))
+
+        if len(unique_columns) < 2:
+            QMessageBox.warning(self, "Error", "Please select at least two unique columns to unpivot.")
+            return
+
+        column_names = [data.columns[col].split(" (")[0] for col in
+                        unique_columns]  # Extract column names without data types
+
+        # Perform the unpivot operation
+        id_vars = [col for col in data.columns if col not in column_names]
+        unpivoted_data = data.melt(id_vars=id_vars, value_vars=column_names, var_name='Variable', value_name='Value')
+
+        if as_same:
+            table_revision.add_revision(unpivoted_data)  # Add unpivoted data as a new revision
+            self.populate_table(unpivoted_data)
+            current_item = self.file_list.currentItem()
+            self.file_list.setCurrentItem(current_item)
+            self.show_table(current_item)
+        else:
+            new_table_name = self.generate_new_table_name("Query")
+            self.tables[new_table_name] = TableRevision(unpivoted_data)
+            new_item = QListWidgetItem(new_table_name)
+            self.file_list.addItem(new_item)
+            self.file_list.setCurrentItem(new_item)
+            self.show_table(new_item)
 
     def undo_revision(self):
         if len(self.tables) < 1:
