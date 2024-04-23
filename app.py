@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+from typing import Dict, Optional
 
 import pandas as pd
 from PyQt6.QtCore import Qt
@@ -8,34 +9,35 @@ from PyQt6.QtGui import QAction, QFont, QIcon, QColor, QPixmap
 from PyQt6.QtWidgets import *
 
 
-# TODO: What the hell am I doing with the loading window? Create a gif maybe?
-
-
 class LoadingDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Loading...")
-        self.setFixedSize(200, 100)
+        self.setFixedSize(150, 150)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+        # Set the background color of the dialog to transparent
+        self.setStyleSheet("background-color: rgba(0, 0, 0, 0);")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # Create a QLabel to hold the loading GIF
+        # Create a QLabel to hold the loading image
         self.label = QLabel(self)
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.label)
 
-        # Load the loading GIF
-        movie = QMovie("path/to/loading.gif")
-        self.label.setMovie(movie)
-        movie.start()
+        # Load the image using QPixmap and resize it
+        pixmap = QPixmap("images/loading_with_text.png")
+        pixmap = pixmap.scaled(128, 128, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+        self.label.setPixmap(pixmap)
 
     def keyPressEvent(self, event):
         # Prevent the dialog from being closed by pressing Esc key
         if event.key() != Qt.Key.Key_Escape:
             super().keyPressEvent(event)
+
 
 class ExportDialog(QDialog):
     """
@@ -203,6 +205,8 @@ class ExportDialog(QDialog):
             QMessageBox.warning(self, "No Output Location", "Please specify an output location.")
             return
 
+        self.parent().loading_dialog.show()
+
         open_files = []
         file_data = {}
         for row in [index.row() for index in selected_rows]:
@@ -234,6 +238,7 @@ class ExportDialog(QDialog):
                                          QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Ok,
                                          QMessageBox.StandardButton.Cancel)
             if reply == QMessageBox.StandardButton.Cancel:
+                self.parent().loading_dialog.hide()
                 return
             else:
                 for file_name in open_files:
@@ -281,6 +286,7 @@ class ExportDialog(QDialog):
                 continue
 
         QMessageBox.information(self, "Export Completed", "The selected tables have been exported successfully.")
+        self.parent().loading_dialog.hide()
         self.close()
 
 
@@ -621,6 +627,8 @@ class MergeDialog(QDialog):
             QMessageBox.warning(self, "Error", "Please select a column from each table.")
             return
 
+        self.parent().loading_dialog.show()
+
         merge_column1 = table1_data.columns[self.selected_column1]
         merge_column2 = table2_data.columns[self.selected_column2]
 
@@ -628,6 +636,7 @@ class MergeDialog(QDialog):
 
         self.merged_data = pd.merge(table1_data, table2_data, left_on=merge_column1, right_on=merge_column2,
                                     how=join_type)
+        self.parent().loading_dialog.hide()
         super().accept()
 
 
@@ -875,10 +884,12 @@ class AppendDialog(QDialog):
 
         append_direction = self.direction_dropdown.currentText().lower()
 
+        self.parent().loading_dialog.show()
         if append_direction == "vertically":
             self.appended_data = pd.concat([table1_data, table2_data], ignore_index=True)
         else:
             self.appended_data = pd.concat([table1_data, table2_data], axis=1)
+        self.parent().loading_dialog.hide()
 
         super().accept()
 
@@ -1275,6 +1286,7 @@ class SpreadsheetApp(QMainWindow):
         dialog.exec()
 
     def populate_table(self, data):
+        self.loading_dialog.show()
         self.table_view.clear()
         self.table_view.setColumnCount(len(data.columns))
         self.table_view.setRowCount(len(data))
@@ -1284,6 +1296,8 @@ class SpreadsheetApp(QMainWindow):
             for j in range(len(data.columns)):
                 item = QTableWidgetItem(str(data.iloc[i, j]))
                 self.table_view.setItem(i, j, item)
+
+        self.loading_dialog.hide()
 
     def show_table(self, item):
         table_name = item.text()
@@ -1569,9 +1583,11 @@ class SpreadsheetApp(QMainWindow):
                 QMessageBox.warning(self, "Error", "The values column cannot be the same as the selected column.")
                 return
 
+            self.loading_dialog.show()
             # Perform the pivot operation
             pivot_data = data.pivot_table(index=data.columns[0], columns=selected_column, values=values_column,
                                           aggfunc="sum")
+            self.loading_dialog.hide()
 
             if as_same:
                 table_revision.add_revision(pivot_data)  # Add pivot data as a new revision
@@ -1616,12 +1632,16 @@ class SpreadsheetApp(QMainWindow):
             QMessageBox.warning(self, "Error", "Please select at least two unique columns to unpivot.")
             return
 
+        self.loading_dialog.show()
+
         column_names = [data.columns[col].split(" (")[0] for col in
                         unique_columns]  # Extract column names without data types
 
         # Perform the unpivot operation
         id_vars = [col for col in data.columns if col not in column_names]
         unpivoted_data = data.melt(id_vars=id_vars, value_vars=column_names, var_name='Variable', value_name='Value')
+
+        self.loading_dialog.hide()
 
         if as_same:
             table_revision.add_revision(unpivoted_data)  # Add unpivoted data as a new revision
