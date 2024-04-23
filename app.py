@@ -9,6 +9,20 @@ from PyQt6.QtGui import QAction, QFont, QIcon, QColor, QPixmap
 from PyQt6.QtWidgets import *
 
 
+# TODO: Make code device and OS agnostic
+
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS2
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+
 class LoadingDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -29,7 +43,7 @@ class LoadingDialog(QDialog):
         layout.addWidget(self.label)
 
         # Load the image using QPixmap and resize it
-        pixmap = QPixmap("images/loading_with_text.png")
+        pixmap = QPixmap(resource_path(os.path.join("assets", "images", "loading_with_text.png")))
         pixmap = pixmap.scaled(128, 128, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         self.label.setPixmap(pixmap)
 
@@ -58,7 +72,7 @@ class ExportDialog(QDialog):
     def __init__(self, tables: Dict[str, 'TableRevision'], parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setWindowTitle("Export Tables")
-        self.setWindowIcon(QIcon("images/crm-icon-high-seas.png"))
+        self.setWindowIcon(QIcon(resource_path(os.path.join("assets", "images", "crm-icon-high-seas.png"))))
         self.setGeometry(100, 100, 500, 400)
 
         self.tables = tables
@@ -363,7 +377,7 @@ class MergeDialog(QDialog):
         super().__init__(parent)
         self.merged_data = None
         self.setWindowTitle("Merge Tables")
-        self.setWindowIcon(QIcon("images/crm-icon-high-seas.png"))
+        self.setWindowIcon(QIcon(resource_path(os.path.join("assets", "images", "crm-icon-high-seas.png"))))
         self.setGeometry(100, 100, 800, 500)
 
         self.tables = tables  # Store the tables dictionary as an instance variable
@@ -425,7 +439,7 @@ class MergeDialog(QDialog):
 
         # Info Button
         info_button = QPushButton()
-        info_button.setIcon(QIcon("images/iconmonstr-info-9-240.png"))
+        info_button.setIcon(QIcon(resource_path(os.path.join("assets", "images", "iconmonstr-info-9-240.png"))))
         info_button.clicked.connect(self.show_join_info)
         join_layout.addWidget(info_button)
 
@@ -552,7 +566,7 @@ class MergeDialog(QDialog):
         scroll_layout.addWidget(inner_join_example)
 
         inner_join_image = QLabel()
-        inner_join_image.setPixmap(QPixmap("images/inner_join.png"))
+        inner_join_image.setPixmap(QPixmap(resource_path(os.path.join("assets", "images", "inner_join.png"))))
         scroll_layout.addWidget(inner_join_image)
 
         # Left Join
@@ -571,7 +585,7 @@ class MergeDialog(QDialog):
         scroll_layout.addWidget(left_join_example)
 
         left_join_image = QLabel()
-        left_join_image.setPixmap(QPixmap("images/left_join.png"))
+        left_join_image.setPixmap(QPixmap(resource_path(os.path.join("assets", "images", "left_join.png"))))
         scroll_layout.addWidget(left_join_image)
 
         # Right Join
@@ -590,7 +604,7 @@ class MergeDialog(QDialog):
         scroll_layout.addWidget(right_join_example)
 
         right_join_image = QLabel()
-        right_join_image.setPixmap(QPixmap("images/right_join.jpg"))
+        right_join_image.setPixmap(QPixmap(resource_path(os.path.join("assets", "images", "right_join.jpg"))))
         scroll_layout.addWidget(right_join_image)
 
         # Outer Join
@@ -609,7 +623,7 @@ class MergeDialog(QDialog):
         scroll_layout.addWidget(outer_join_example)
 
         outer_join_image = QLabel()
-        outer_join_image.setPixmap(QPixmap("images/outer_join.png"))
+        outer_join_image.setPixmap(QPixmap(resource_path(os.path.join("assets", "images", "outer_join.png"))))
         scroll_layout.addWidget(outer_join_image)
 
         info_dialog.exec()
@@ -663,7 +677,7 @@ class AppendDialog(QDialog):
         super().__init__(parent)
         self.appended_data = None
         self.setWindowTitle("Append Tables")
-        self.setWindowIcon(QIcon("images/crm-icon-high-seas.png"))
+        self.setWindowIcon(QIcon(resource_path(os.path.join("assets", "images", "crm-icon-high-seas.png"))))
         self.setGeometry(100, 100, 800, 500)
 
         self.tables = tables  # Store the tables dictionary as an instance variable
@@ -725,7 +739,7 @@ class AppendDialog(QDialog):
 
         # Info Button
         info_button = QPushButton()
-        info_button.setIcon(QIcon("images/iconmonstr-info-9-240.png"))
+        info_button.setIcon(QIcon(resource_path(os.path.join("assets", "images", "iconmonstr-info-9-240.png"))))
         info_button.clicked.connect(self.show_append_info)
         direction_layout.addWidget(info_button)
 
@@ -868,7 +882,7 @@ class AppendDialog(QDialog):
         scroll_layout.addWidget(horizontal_append_example)
 
         append_image = QLabel()
-        append_image.setPixmap(QPixmap("images/appends.png"))
+        append_image.setPixmap(QPixmap(resource_path(os.path.join("assets", "images", "appends.png"))))
         scroll_layout.addWidget(append_image)
 
         info_dialog.exec()
@@ -987,7 +1001,7 @@ class SpreadsheetApp(QMainWindow):
         self.table_view = None
         self.file_list = None
         self.setWindowTitle("Spreadsheet Application")
-        self.setWindowIcon(QIcon("images/crm-icon-high-seas.png"))
+        self.setWindowIcon(QIcon(resource_path(os.path.join("assets", "images", "crm-icon-high-seas.png"))))
         self.setGeometry(100, 100, 800, 600)
 
         self.tables = {}
@@ -1719,10 +1733,13 @@ def load_stylesheet() -> str:
     :return: The stylesheet content as a string.
     """
     # Determine the full path to the icons folder
-    icons_path = "images"
+    assets_path = "assets"
+    icons_path = os.path.join(assets_path, "images")
+    style_path = os.path.join(assets_path, "style")
     try:
-        with open("stylesheet.qss", "r") as file:
-            return file.read().replace('{{ICON_PATH}}', str(icons_path).replace("\\", "/"))
+        stylesheet = os.path.join(resource_path(style_path), "stylesheet.qss")
+        with open(stylesheet, "r") as file:
+            return file.read().replace('{{ICON_PATH}}', str(resource_path(icons_path)).replace("\\", "/"))
     except IOError:
         print(
             f"Error opening stylesheet file: "
